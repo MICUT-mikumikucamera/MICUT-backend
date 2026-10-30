@@ -1,0 +1,23 @@
+{
+    "job_id": "j_2026_0031",
+    "photo": "/uploads/abc.jpg",
+    "capture": {
+        "w": 3024,
+        "h": 4032,
+        "rotation": 90,
+        "fx": null
+    },
+    "status": "done",
+    "attempt": 1,
+    "result": {
+        "image_url": "/results/j_2026_0031.jpg",
+        "tags": [
+            "outdoor",
+            "day"
+        ],
+        "card_ids": []
+    },
+    "error": null,
+    "created_at": "2026-11-05T14:00:00+09:00",
+    "updated_at": "2026-11-05T14:00:15+09:00"
+}

@@ -1,0 +1,55 @@
+{
+  "description": "실패 응답 형식과 에러 코드 목록. 업로드 실패든 AI 실패든 같은 모양을 쓴다.",
+  "format": {
+    "status": "failed",
+    "error": {
+      "code": "AI_TIMEOUT",
+      "message": "처리가 오래 걸렸어요",
+      "retryable": true
+    }
+  },
+  "codes": {
+    "UPLOAD_INVALID_FORMAT": {
+      "stage": "upload",
+      "retryable": false,
+      "message": "지원하지 않는 사진 형식이에요",
+      "fe_action": "retake"
+    },
+    "UPLOAD_TOO_LARGE": {
+      "stage": "upload",
+      "retryable": false,
+      "message": "사진 용량이 너무 커요",
+      "fe_action": "retake"
+    },
+    "PERSON_NOT_FOUND": {
+      "stage": "ai",
+      "retryable": false,
+      "message": "사진에서 사람을 찾지 못했어요. 전신이 나오게 다시 찍어주세요",
+      "fe_action": "retake"
+    },
+    "FOOT_LOW_CONFIDENCE": {
+      "stage": "ai",
+      "retryable": false,
+      "message": "발이 잘 보이지 않아요. 양발과 바닥이 나오게 다시 찍어주세요",
+      "fe_action": "retake"
+    },
+    "AI_TIMEOUT": {
+      "stage": "ai",
+      "retryable": true,
+      "message": "처리가 오래 걸렸어요",
+      "fe_action": "retry"
+    },
+    "RENDER_FAILED": {
+      "stage": "ai",
+      "retryable": true,
+      "message": "미쿠를 그리는 중에 문제가 생겼어요",
+      "fe_action": "retry"
+    },
+    "INTERNAL_ERROR": {
+      "stage": "any",
+      "retryable": true,
+      "message": "잠시 후 다시 시도해주세요",
+      "fe_action": "retry"
+    }
+  }
+}
