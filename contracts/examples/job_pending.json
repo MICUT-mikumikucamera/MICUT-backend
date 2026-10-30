@@ -1,0 +1,17 @@
+{
+    "description": "w, h는 파일에 저장된 그대로의 크기 (FE와 협의 중)",
+    "job_id": "j_2026_0031",
+    "photo": "/uploads/abc.jpg",
+    "capture": {
+        "w": 3024,
+        "h": 4032,
+        "rotation": 90,
+        "fx": null
+    },
+    "status": "pending",
+    "attempt": 1,
+    "result": null,
+    "error": null,
+    "created_at": "2026-11-05T14:00:00+09:00",
+    "updated_at": "2026-11-05T14:00:00+09:00"
+}
