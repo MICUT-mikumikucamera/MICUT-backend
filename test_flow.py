@@ -51,7 +51,7 @@ def photo_exists(job_id):
 jid = submit()
 job = c.get(f"/api/v1/jobs/{jid}").json()
 assert job["status"] == "done"
-assert c.get(job["result"]["image_url"]).content == JPG
+assert c.get(job["result"]["image_url"]).content == (ROOT / "samples" / "cafe-composite.png").read_bytes()
 assert not photo_exists(jid)
 
 # 재시도: failed + retryable → pending, attempt +1, error 비움 → 다시 처리되어 done
