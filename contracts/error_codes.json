@@ -56,6 +56,12 @@
       "message": "발이 잘 보이지 않아요. 양발과 바닥이 나오게 다시 찍어주세요",
       "fe_action": "retake"
     },
+    "NO_VALID_CANDIDATE": {
+      "stage": "ai",
+      "retryable": false,
+      "message": "캐릭터를 배치할 자리가 없어요. 다른 장면을 찍어주세요.",
+      "fe_action": "retake"
+    },
     "AI_TIMEOUT": {
       "stage": "ai",
       "retryable": true,
