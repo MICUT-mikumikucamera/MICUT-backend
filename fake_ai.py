@@ -1,8 +1,6 @@
 import os
-import shutil
 import subprocess
 import sys
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -14,9 +12,6 @@ from schemas import JobError, JobResult
 KST = timezone(timedelta(hours=9))
 RESULT_DIR = Path("results")
 RESULT_DIR.mkdir(exist_ok=True)
-SAMPLE_CASE = os.getenv("MICUT_SAMPLE_CASE", "success")
-if SAMPLE_CASE not in ("success", "no-placement", "real"):
-    raise ValueError("MICUT_SAMPLE_CASE must be success, no-placement or real")
 
 
 def run_pipeline(photo: Path, out: Path) -> JobError | None:
@@ -50,8 +45,6 @@ def run(job_id: str) -> None:
     job = store.get_job(job_id)
     attempt = job.attempt
 
-    if SAMPLE_CASE != "real":
-        time.sleep(2)
     job = store.get_job(job_id)
     if job.attempt != attempt or job.status != "pending":
         return
@@ -64,25 +57,17 @@ def run(job_id: str) -> None:
     try:
         with TemporaryDirectory(dir=".") as work:
             out = Path(work).resolve() / "output"  # run.py가 직접 생성한다.
-            if SAMPLE_CASE == "real":
-                photo = (Path("uploads") / Path(job.photo).name).resolve()
-                error = run_pipeline(photo, out)
-                image = out / "composite" / "composite_depth.png"
-            else:
-                time.sleep(13)
-                image = Path(work) / "sample.png"
-                if SAMPLE_CASE == "no-placement":
-                    error = JobError(code="NO_VALID_CANDIDATE", **CODES["NO_VALID_CANDIDATE"])
-                else:
-                    shutil.copyfile(Path(__file__).with_name("samples") / "cafe-composite.png", image)
+            photo = (Path("uploads") / Path(job.photo).name).resolve()
+            error = run_pipeline(photo, out)
 
             if error is None:
+                image = out / "composite" / "composite_depth.png"
                 with image.open("rb") as png:
                     if png.read(8) != b"\x89PNG\r\n\x1a\n":
                         raise ValueError("Invalid composite PNG")
                 if store.get_job(job_id).attempt != attempt:
                     return
-                name = f"{job_id}-{attempt}.png" if SAMPLE_CASE == "real" else f"{job_id}.png"
+                name = f"{job_id}-{attempt}.png"
                 image.replace(RESULT_DIR / name)
                 result = JobResult(image_url=f"/results/{name}", tags=[], card_ids=[])
     except KeyError as exc:

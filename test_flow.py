@@ -22,10 +22,20 @@ import store  # noqa: E402
 from main import app  # noqa: E402
 from schemas import JobError  # noqa: E402
 
-fake_ai.time.sleep = lambda seconds: None
 c = TestClient(app)
 JPG = b"\xff\xd8\xff\xe0" + b"0" * 100
 FIELDS = {"w": "3024", "h": "4032", "rotation": "90"}
+
+
+# API 흐름 테스트에서는 외부 AI 대신 테스트용 합성 결과를 쓴다.
+def stub_pipeline(photo, out):
+    assert photo.read_bytes() == JPG
+    image = out / "composite" / "composite_depth.png"
+    image.parent.mkdir(parents=True)
+    shutil.copyfile(ROOT / "samples" / "cafe-composite.png", image)
+
+
+fake_ai.run_pipeline = stub_pipeline
 
 
 def submit():
