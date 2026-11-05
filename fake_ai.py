@@ -5,13 +5,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from httpx import HTTPError
+
+import files
 import store
 from errors import CODES
 from schemas import JobError, JobResult
 
 KST = timezone(timedelta(hours=9))
-RESULT_DIR = Path("results")
-RESULT_DIR.mkdir(exist_ok=True)
 
 
 def run_pipeline(photo: Path, out: Path) -> JobError | None:
@@ -57,7 +58,9 @@ def run(job_id: str) -> None:
     try:
         with TemporaryDirectory(dir=".") as work:
             out = Path(work).resolve() / "output"  # run.py가 직접 생성한다.
-            photo = (Path("uploads") / Path(job.photo).name).resolve()
+            photo_name = Path(job.photo).name
+            photo = Path(work).resolve() / photo_name
+            photo.write_bytes(files.load("uploads", photo_name))
             error = run_pipeline(photo, out)
 
             if error is None:
@@ -68,11 +71,11 @@ def run(job_id: str) -> None:
                 if store.get_job(job_id).attempt != attempt:
                     return
                 name = f"{job_id}-{attempt}.png"
-                image.replace(RESULT_DIR / name)
+                files.save("results", name, image.read_bytes())
                 result = JobResult(image_url=f"/results/{name}", tags=[], card_ids=[])
     except KeyError as exc:
         error = JobError(code="INTERNAL_ERROR", message=f"서버에 {exc.args[0]} 설정이 없어요.", retryable=True)
-    except (OSError, ValueError):
+    except (OSError, ValueError, HTTPError):
         error = JobError(code="RENDER_FAILED", message="합성 실행 또는 결과 파일을 확인할 수 없어요.", retryable=True)
 
     job = store.get_job(job_id)

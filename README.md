@@ -5,6 +5,23 @@
 - API 명세: [docs/API.md](docs/API.md)
 - 데이터 계약: [contracts/](contracts/) (작업 상태, 응답 예시, 에러 코드)
 
+## 공유 서버
+
+`main` 브랜치가 Render 무료 플랜에 올라가 있어요. 설치 없이 바로 쓸 수 있어요.
+
+- 서버 주소: https://micut-backend.onrender.com
+- Swagger: https://micut-backend.onrender.com/docs
+
+무료 플랜이라 15분 동안 요청이 없으면 잠들고, 깨어나는 데 약 1분 걸려요. 시연 전에 `/health`를 한 번 열어 두세요.
+
+**저장 위치:** 아래 환경 변수가 있으면 작업 기록은 Supabase PostgreSQL에, 사진은 Supabase Storage에 저장돼서 서버가 재시작돼도 남아요. 없으면 서버 디스크(SQLite, 폴더)에 저장되고, 재시작하면 초기화돼요. 항목은 [.env.example](.env.example)에 있어요.
+
+| 환경 변수 | 내용 |
+| --- | --- |
+| `DATABASE_URL` | Supabase Session pooler 연결 문자열 |
+| `SUPABASE_URL`, `SUPABASE_KEY` | Supabase 프로젝트 주소와 service_role 키 (서버 전용, 앱에 넣지 않기) |
+| `SUPABASE_BUCKET` | Storage 공개 버킷 이름 (기본 `micut`) |
+
 ## 처음 한 번: 설치
 
 Python 3.13이 필요해요. PowerShell에서 저장소 폴더로 이동한 뒤 실행해요.
@@ -42,13 +59,15 @@ fastapi run main.py
 - 처음 실행할 때 Windows 방화벽 창이 뜨면 "개인 네트워크" 허용을 눌러요.
 - 서버를 켠 PC가 꺼지면 다른 사람도 접속할 수 없어요.
 
-**Flutter 앱을 이 서버에 연결할 때**
+**Flutter 앱을 서버에 연결할 때** (MICUT-frontend 폴더에서)
 
 ```bash
-flutter run --dart-define=MICUT_REAL_API=true --dart-define=MICUT_API_URL=http://192.168.0.10:8000
+flutter run --dart-define=API_BASE_URL=https://micut-backend.onrender.com
 ```
 
-Android 에뮬레이터에서는 PC 주소로 `http://10.0.2.2:8000`을 써요.
+- `API_BASE_URL`이 없으면 앱은 서버 없이 가짜 응답으로 동작해요.
+- 브라우저(`flutter run -d chrome`)에서도 접속할 수 있어요 (서버가 CORS를 허용).
+- 폰 앱은 기본적으로 HTTPS 서버만 접속해요. 내 PC 서버(`http://192.168.0.10:8000`, Android 에뮬레이터는 `http://10.0.2.2:8000`)에 붙이려면 FE에서 개발용 HTTP 허용 설정이 필요해요.
 
 ## 확인
 
@@ -75,6 +94,7 @@ python test_flow.py
 | `main.py` | 서버 시작점. 라우터, 에러 처리, 이미지 경로 등록 |
 | `routers/jobs.py` | 작업 API 4개 (접수, 조회, 재시도, discard) |
 | `schemas.py` | 작업(Job) 응답 모양 |
-| `store.py` | 작업 기록 저장 (SQLite) |
+| `store.py` | 작업 기록 저장 (Supabase PostgreSQL, 없으면 SQLite) |
+| `files.py` | 사진 저장 (Supabase Storage, 없으면 `uploads/`·`results/` 폴더) |
 | `errors.py` | 모든 실패 응답을 `contracts/error_codes.json` 모양으로 통일 |
 | `fake_ai.py` | **AI 연결 전 시연용 가짜 처리.** 실제 AI는 여기와 `routers/jobs.py`의 `TODO(박유진)` 자리에 붙어요 |

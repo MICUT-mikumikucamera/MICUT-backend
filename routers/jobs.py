@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, Form, UploadFile
 
 import fake_ai
+import files
 import store
 from errors import AppError
 from schemas import Capture, Job
@@ -14,12 +15,10 @@ router = APIRouter(prefix="/api/v1/jobs", tags=["jobs"])
 KST = timezone(timedelta(hours=9))
 MAX_SIZE = 10 * 1024 * 1024
 DISCARD_AFTER = timedelta(hours=24)
-UPLOAD_DIR = Path("uploads")
-UPLOAD_DIR.mkdir(exist_ok=True)
 
 
 def delete_photo(job: Job) -> None:
-    (UPLOAD_DIR / Path(job.photo).name).unlink(missing_ok=True)
+    files.delete("uploads", Path(job.photo).name)
 
 
 def discard(job: Job) -> None:
@@ -62,7 +61,7 @@ def create_job(
 
     now = datetime.now(KST)
     job_id = f"j_{now:%Y%m%d}_{secrets.token_hex(6)}"
-    (UPLOAD_DIR / f"{job_id}{ext}").write_bytes(data)
+    files.save("uploads", f"{job_id}{ext}", data)
 
     job = Job(
         job_id=job_id,

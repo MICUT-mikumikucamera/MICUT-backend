@@ -10,6 +10,8 @@ from datetime import timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+for name in ("DATABASE_URL", "SUPABASE_URL", "SUPABASE_KEY"):
+    os.environ.pop(name, None)  # 항상 내 PC 모드(SQLite, 폴더)로 시험한다.
 tmp = tempfile.mkdtemp()
 shutil.copytree(ROOT / "contracts", Path(tmp) / "contracts")
 os.chdir(tmp)
