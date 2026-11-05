@@ -1,0 +1,47 @@
+{
+    "description": "작업(job)의 상태값. 이 4개 외의 값은 쓰지 않는다. 전부 소문자.",
+    "values": {
+        "pending": {
+            "meaning": "접수됨, 시작 전",
+            "set_by": "app",
+            "result": "null",
+            "error": "null"
+        },
+        "processing": {
+            "meaning": "AI 실행 중",
+            "set_by": "ai",
+            "result": "null",
+            "error": "null"
+        },
+        "done": {
+            "meaning": "완료, result 채워짐",
+            "set_by": "ai",
+            "result": "required",
+            "error": "null"
+        },
+        "failed": {
+            "meaning": "실패, error 채워짐",
+            "set_by": "ai",
+            "result": "null",
+            "error": "required"
+        }
+    },
+    "transitions": [
+        "pending -> processing",
+        "processing -> done",
+        "processing -> failed",
+        "failed -> pending"
+    ],
+    "rules": [
+        "재시도는 새 job을 만들지 않고 같은 job을 다시 쓴다.",
+        "재시도는 error.retryable이 true인 실패만 가능하다.",
+        "재시도할 때 app이 status를 pending으로 바꾸고, error를 null로 비우고, attempt를 1 올린다.",
+        "ai는 작업을 시작할 때의 attempt와 결과를 쓰는 시점의 attempt가 같을 때만 결과를 쓴다.",
+        "업로드 실패는 job을 만들지 않고 실패 응답만 돌려준다.",
+        "job_id는 추측하기 어려운 랜덤 값으로 만든다 (j_날짜_랜덤12자리).",
+        "원본 사진 삭제는 앱 연결이 담당한다. done이나 retryable이 false인 failed를 확인하면 삭제한다.",
+        "retryable이 true인 failed는 재시도에 필요하므로 원본을 보관하고, app이 discard를 호출하면 삭제한다.",
+        "discard하면 error.retryable을 false로 바꾼다. 그래서 이후 재시도는 기존 규칙에 따라 불가능하다.",
+        "app이 discard를 호출하지 않아도, retryable이 true인 failed가 updated_at부터 24시간 지나면 앱 연결이 discard와 똑같이 처리한다."
+    ]
+}
