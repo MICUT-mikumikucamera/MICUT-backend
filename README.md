@@ -59,13 +59,15 @@ fastapi run main.py
 - 처음 실행할 때 Windows 방화벽 창이 뜨면 "개인 네트워크" 허용을 눌러요.
 - 서버를 켠 PC가 꺼지면 다른 사람도 접속할 수 없어요.
 
-**Flutter 앱을 이 서버에 연결할 때**
+**Flutter 앱을 서버에 연결할 때** (MICUT-frontend 폴더에서)
 
 ```bash
-flutter run --dart-define=MICUT_REAL_API=true --dart-define=MICUT_API_URL=http://192.168.0.10:8000
+flutter run --dart-define=API_BASE_URL=https://micut-backend.onrender.com
 ```
 
-Android 에뮬레이터에서는 PC 주소로 `http://10.0.2.2:8000`을 써요.
+- `API_BASE_URL`이 없으면 앱은 서버 없이 가짜 응답으로 동작해요.
+- 브라우저(`flutter run -d chrome`)에서도 접속할 수 있어요 (서버가 CORS를 허용).
+- 폰 앱은 기본적으로 HTTPS 서버만 접속해요. 내 PC 서버(`http://192.168.0.10:8000`, Android 에뮬레이터는 `http://10.0.2.2:8000`)에 붙이려면 FE에서 개발용 HTTP 허용 설정이 필요해요.
 
 ## 확인
 
