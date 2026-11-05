@@ -5,6 +5,15 @@
 - API 명세: [docs/API.md](docs/API.md)
 - 데이터 계약: [contracts/](contracts/) (작업 상태, 응답 예시, 에러 코드)
 
+## 공유 서버
+
+`main` 브랜치가 Render 무료 플랜에 올라가 있어요. 설치 없이 바로 쓸 수 있어요.
+
+- 서버 주소: https://micut-backend.onrender.com
+- Swagger: https://micut-backend.onrender.com/docs
+
+무료 플랜이라 15분 동안 요청이 없으면 잠들고, 깨어나는 데 약 1분 걸려요. 시연 전에 `/health`를 한 번 열어 두세요. 재배포·재시작·잠들기 때 작업 기록과 사진이 초기화돼요.
+
 ## 처음 한 번: 설치
 
 Python 3.13이 필요해요. PowerShell에서 저장소 폴더로 이동한 뒤 실행해요.
