@@ -38,7 +38,7 @@
 
 **AI 연결 전 시연 모드 (현재)**
 
-AI가 붙기 전까지는 서버가 AI 대신 가짜 처리를 해요. 접수하면 약 2초 뒤 `processing`, 약 5초 뒤 `done`이 되고, 결과 이미지는 원본 사진을 `crop` 영역으로 자른 것이에요. 가짜 처리는 실패하지 않으므로 `failed` 화면은 `contracts/examples/job_failed.json`으로 만들어 주세요.
+AI가 붙기 전까지는 서버가 AI 대신 가짜 처리를 해요. 접수하면 약 2초 뒤 `processing`, 약 5초 뒤 `done`이 되고, 결과 이미지는 원본 사진을 복사한 것이에요. 가짜 처리는 실패하지 않으므로 `failed` 화면은 `contracts/examples/job_failed.json`으로 만들어 주세요.
 
 ## 3. API
 
@@ -208,7 +208,7 @@ failed일 때
 - 접수에 `crop` 필드 추가 (필수), 응답 `capture.crop` 추가
 - `rotation`은 항상 `0`, `w`, `h`는 방향 정리 후 실제 크기
 - 사진 크기·crop 범위 검증 추가 (실패 시 `422 INVALID_REQUEST`), 깨진 사진은 `400 UPLOAD_INVALID_FORMAT`
-- 시연 모드 결과 이미지를 `crop` 영역으로 자름
+- 결과 이미지에 `crop`을 적용하는 것은 AI 처리 쪽에서 아직 남은 작업
 
 **v0.1 (2026-11-04)**
 

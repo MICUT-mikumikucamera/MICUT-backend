@@ -27,7 +27,6 @@ import store  # noqa: E402
 from main import app  # noqa: E402
 from schemas import Job, JobError  # noqa: E402
 
-fake_ai.time.sleep = lambda seconds: None
 c = TestClient(app)
 buf = io.BytesIO()
 Image.new("RGB", (40, 30)).save(buf, "JPEG")
@@ -39,6 +38,17 @@ FIELDS = {"w": "40", "h": "30", "rotation": "0", "crop": CROP}
 def post(photo=JPG, **changes):
     data = {k: v for k, v in {**FIELDS, **changes}.items() if v is not None}
     return c.post("/api/v1/jobs", files={"photo": ("a.jpg", photo, "image/jpeg")}, data=data)
+
+
+# API 흐름 테스트에서는 외부 AI 대신 테스트용 합성 결과를 쓴다.
+def stub_pipeline(photo, out):
+    assert photo.read_bytes() == JPG
+    image = out / "composite" / "composite_depth.png"
+    image.parent.mkdir(parents=True)
+    shutil.copyfile(ROOT / "samples" / "cafe-composite.png", image)
+
+
+fake_ai.run_pipeline = stub_pipeline
 
 
 def submit():
@@ -91,12 +101,12 @@ def photo_exists(job_id):
     return any(Path("uploads").glob(f"{job_id}.*"))
 
 
-# done이 되면 crop 영역만 잘린 결과가 열리고 원본은 지워진다
+# done이 되면 결과가 열리고 원본은 지워진다. 조회 응답에도 crop이 남는다.
 jid = submit()
 job = c.get(f"/api/v1/jobs/{jid}").json()
 assert job["status"] == "done"
 assert job["capture"]["crop"] == {"x": 10, "y": 0, "width": 22, "height": 30}
-assert Image.open(io.BytesIO(c.get(job["result"]["image_url"]).content)).size == (22, 30)
+assert c.get(job["result"]["image_url"]).content == (ROOT / "samples" / "cafe-composite.png").read_bytes()
 assert not photo_exists(jid)
 
 # 재시도: failed + retryable → pending, attempt +1, error 비움 → 다시 처리되어 done
