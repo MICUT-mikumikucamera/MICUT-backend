@@ -17,23 +17,65 @@ shutil.copytree(ROOT / "contracts", Path(tmp) / "contracts")
 os.chdir(tmp)
 sys.path.insert(0, str(ROOT))
 
+import io  # noqa: E402
+
 from fastapi.testclient import TestClient  # noqa: E402
+from PIL import Image  # noqa: E402
 
 import fake_ai  # noqa: E402
 import store  # noqa: E402
 from main import app  # noqa: E402
-from schemas import JobError  # noqa: E402
+from schemas import Job, JobError  # noqa: E402
 
 fake_ai.time.sleep = lambda seconds: None
 c = TestClient(app)
-JPG = b"\xff\xd8\xff\xe0" + b"0" * 100
-FIELDS = {"w": "3024", "h": "4032", "rotation": "90"}
+buf = io.BytesIO()
+Image.new("RGB", (40, 30)).save(buf, "JPEG")
+JPG = buf.getvalue()
+CROP = '{"x":10,"y":0,"width":22,"height":30}'
+FIELDS = {"w": "40", "h": "30", "rotation": "0", "crop": CROP}
+
+
+def post(photo=JPG, **changes):
+    data = {k: v for k, v in {**FIELDS, **changes}.items() if v is not None}
+    return c.post("/api/v1/jobs", files={"photo": ("a.jpg", photo, "image/jpeg")}, data=data)
 
 
 def submit():
-    r = c.post("/api/v1/jobs", files={"photo": ("a.jpg", JPG, "image/jpeg")}, data=FIELDS)
+    r = post()
     assert r.status_code == 201, r.text
     return r.json()["job_id"]
+
+
+# crop은 응답 capture에 그대로 남는다
+r = post()
+assert r.status_code == 201, r.text
+assert r.json()["capture"] == {"w": 40, "h": 30, "rotation": 0, "fx": None,
+                               "crop": {"x": 10, "y": 0, "width": 22, "height": 30}}
+
+# 잘못된 접수는 자동 보정 없이 422 INVALID_REQUEST
+for bad in [
+    {"crop": None},                                          # crop 없음
+    {"crop": "not json"},
+    {"crop": '"{\\"x\\":10,\\"y\\":0,\\"width\\":22,\\"height\\":30}"'},  # 이중 인코딩
+    {"crop": '{"x":10.5,"y":0,"width":22,"height":30}'},     # 정수 아님
+    {"crop": '{"x":"10","y":0,"width":22,"height":30}'},
+    {"crop": '{"x":-1,"y":0,"width":22,"height":30}'},
+    {"crop": '{"x":10,"y":0,"width":0,"height":30}'},
+    {"crop": '{"x":19,"y":0,"width":22,"height":30}'},       # 오른쪽 밖 (19+22 > 40)
+    {"crop": '{"x":0,"y":1,"width":22,"height":30}'},        # 아래쪽 밖
+    {"w": "30", "h": "40"},                                  # 실제 크기와 다름
+    {"rotation": "90"},
+]:
+    r = post(**bad)
+    assert r.status_code == 422 and r.json()["error"]["code"] == "INVALID_REQUEST", (bad, r.text)
+assert post(crop='{"x":0,"y":0,"width":40,"height":30}').status_code == 201  # 사진 전체
+r = post(photo=b"\xff\xd8\xff\xe0" + b"0" * 100)                       # JPEG 머리만 있고 깨진 파일
+assert r.status_code == 400 and r.json()["error"]["code"] == "UPLOAD_INVALID_FORMAT"
+
+# crop이 없는 예전 작업도 읽힌다
+old = Job.model_validate_json(store.get_job(submit()).model_dump_json(exclude={"capture": {"crop"}}))
+assert old.capture.crop is None
 
 
 def make_failed(job_id, retryable=True, hours_ago=0):
@@ -49,11 +91,12 @@ def photo_exists(job_id):
     return any(Path("uploads").glob(f"{job_id}.*"))
 
 
-# done이 되면 결과는 열리고 원본은 지워진다
+# done이 되면 crop 영역만 잘린 결과가 열리고 원본은 지워진다
 jid = submit()
 job = c.get(f"/api/v1/jobs/{jid}").json()
 assert job["status"] == "done"
-assert c.get(job["result"]["image_url"]).content == JPG
+assert job["capture"]["crop"] == {"x": 10, "y": 0, "width": 22, "height": 30}
+assert Image.open(io.BytesIO(c.get(job["result"]["image_url"]).content)).size == (22, 30)
 assert not photo_exists(jid)
 
 # 재시도: failed + retryable → pending, attempt +1, error 비움 → 다시 처리되어 done

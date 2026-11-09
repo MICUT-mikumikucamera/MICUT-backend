@@ -1,6 +1,6 @@
-# MiCut BE 앱 연결 API 명세 v0.1
+# MiCut BE 앱 연결 API 명세 v0.2
 
-2026-11-04 기준 · v0 대비 바뀐 점은 [6. 변경 이력](#6-변경-이력)에 있어요.
+2026-11-09 기준 · v0 대비 바뀐 점은 [6. 변경 이력](#6-변경-이력)에 있어요.
 
 ## 1. 백엔드 스택과 명세 공유 방식
 
@@ -38,7 +38,7 @@
 
 **AI 연결 전 시연 모드 (현재)**
 
-AI가 붙기 전까지는 서버가 AI 대신 가짜 처리를 해요. 접수하면 약 2초 뒤 `processing`, 약 5초 뒤 `done`이 되고, 결과 이미지는 원본 사진을 복사한 것이에요. 가짜 처리는 실패하지 않으므로 `failed` 화면은 `contracts/examples/job_failed.json`으로 만들어 주세요.
+AI가 붙기 전까지는 서버가 AI 대신 가짜 처리를 해요. 접수하면 약 2초 뒤 `processing`, 약 5초 뒤 `done`이 되고, 결과 이미지는 원본 사진을 `crop` 영역으로 자른 것이에요. 가짜 처리는 실패하지 않으므로 `failed` 화면은 `contracts/examples/job_failed.json`으로 만들어 주세요.
 
 ## 3. API
 
@@ -48,15 +48,26 @@ AI가 붙기 전까지는 서버가 AI 대신 가짜 처리를 해요. 접수하
 
 | 필드 | 타입 | 필수 | 설명 |
 | --- | --- | --- | --- |
-| photo | 파일 | O | 촬영한 사진 원본 (JPEG 또는 PNG, 10MB 이하) |
-| w | int | O | 사진 가로 픽셀 |
-| h | int | O | 사진 세로 픽셀 |
-| rotation | int | O | 회전 각도 (예: 90) |
+| photo | 파일 | O | 크롭·축소하지 않은 전체 화각 사진 (JPEG 또는 PNG, 10MB 이하) |
+| w | int | O | 보낸 사진의 실제 가로 픽셀 |
+| h | int | O | 보낸 사진의 실제 세로 픽셀 |
+| rotation | int | O | 항상 `0` (앱이 EXIF 방향을 픽셀에 적용한 뒤 보냄) |
 | fx | float | X | 카메라 초점거리, 모르면 안 보내도 됨 |
+| crop | JSON 텍스트 | O | 최종 결과로 쓸 영역 `{"x":875,"y":0,"width":2250,"height":3000}` |
 
-- `w`, `h`, `rotation`, `fx`는 **각각 별도 폼 필드**로 보내 주세요. `capture` JSON 한 필드로 보내면 `422 INVALID_REQUEST`가 나요.
+- `w`, `h`, `rotation`, `fx`, `crop`은 **각각 별도 폼 필드**로 보내 주세요. `capture` JSON 한 필드로 보내면 `422 INVALID_REQUEST`가 나요.
+- `crop`은 multipart의 텍스트 필드예요. 값은 위 JSON 그대로이고, 문자열로 한 번 더 감싸지(이중 인코딩) 않아요.
+- `crop` 좌표는 보낸 사진의 좌상단이 `(0, 0)`인 **정수 픽셀**이에요. 사용하는 영역은 `[x, x+width)`, `[y, y+height)`예요.
+- 서버는 사진을 회전하지 않아요. 방향 정리가 끝난 사진과 그 크기를 보내 주세요.
 - 사진 형식은 파일 확장자가 아니라 파일 내용으로 확인해요. HEIC는 받지 않으니 JPEG로 보내 주세요.
-- AI가 사진 EXIF의 초점거리를 쓰므로, 앱에서 다시 압축하거나 리사이즈하지 말고 원본 그대로 보내 주세요.
+- AI가 사진 EXIF의 초점거리를 써요. JPEG로 다시 인코딩할 때 EXIF(특히 초점거리)가 남아 있어야 해요.
+
+**검증** — 아래 중 하나라도 맞지 않으면 자동 보정 없이 `422 INVALID_REQUEST`예요.
+
+- 사진의 실제 크기 == `w`, `h`
+- `rotation == 0`
+- `crop`이 JSON 객체이고 네 값이 모두 정수 (`875.0`, `"875"`도 거절)
+- `x >= 0`, `y >= 0`, `width > 0`, `height > 0`, `x + width <= w`, `y + height <= h`
 
 응답 `201`
 
@@ -64,7 +75,10 @@ AI가 붙기 전까지는 서버가 AI 대신 가짜 처리를 해요. 접수하
 {
   "job_id": "j_20261105_a1b2c3d4e5f6",
   "photo": "/uploads/j_20261105_a1b2c3d4e5f6.jpg",
-  "capture": { "w": 3024, "h": 4032, "rotation": 90, "fx": null },
+  "capture": {
+    "w": 4000, "h": 3000, "rotation": 0, "fx": null,
+    "crop": { "x": 875, "y": 0, "width": 2250, "height": 3000 }
+  },
   "status": "pending",
   "attempt": 1,
   "result": null,
@@ -74,7 +88,10 @@ AI가 붙기 전까지는 서버가 AI 대신 가짜 처리를 해요. 접수하
 }
 ```
 
-실패: `400 UPLOAD_INVALID_FORMAT`, `413 UPLOAD_TOO_LARGE`, `422 INVALID_REQUEST`. 업로드가 실패하면 작업이 만들어지지 않아요.
+실패: `400 UPLOAD_INVALID_FORMAT` (지원하지 않거나 깨진 사진), `413 UPLOAD_TOO_LARGE`, `422 INVALID_REQUEST`. 업로드가 실패하면 작업이 만들어지지 않아요.
+
+- `capture.crop`은 조회 응답에도 그대로 남아요. 2026-11-08 이전에 만든 작업은 `crop`이 `null`이에요.
+- 재시도할 때도 처음 보낸 원본과 `crop`을 그대로 써요.
 
 ### ② 상태 조회
 
@@ -149,7 +166,7 @@ failed일 때
 | --- | --- | --- | --- | --- |
 | UPLOAD_INVALID_FORMAT | 지원하지 않는 사진 형식 | 400 | false | 다시 찍기 |
 | UPLOAD_TOO_LARGE | 용량 초과 (10MB) | 413 | false | 다시 찍기 |
-| INVALID_REQUEST | 필수 필드 누락, 타입 오류 | 422 | false | 다시 찍기 |
+| INVALID_REQUEST | 필수 필드 누락, 타입 오류, 크기·crop 범위 불일치 | 422 | false | 다시 찍기 |
 | JOB_NOT_FOUND | 없는 작업 | 404 | false | 다시 찍기 |
 | RETRY_NOT_ALLOWED | 재시도할 수 없는 작업에 재시도 | 409 | false | 다시 찍기 |
 | PERSON_NOT_FOUND | 사람 인식 실패 | 조회 200 | false | 다시 찍기 |
@@ -170,9 +187,9 @@ failed일 때
 
 **FE에 확인 부탁드릴 것**
 
-- [ ] 접수할 때 `w`, `h`, `rotation`, `fx`를 각각 폼 필드로 보내 주실 수 있는지 (현재 `ApiJobRepository`는 `capture` JSON 한 필드로 보내고 있어요)
-- [ ] `w`, `h`를 파일에 저장된 그대로의 크기(회전 적용 전 기준)로 보내 주실 수 있는지
-- [ ] 사진을 재압축·리사이즈 없이 원본으로 보내 주실 수 있는지 (HEIC는 JPEG로)
+- [x] 접수할 때 `w`, `h`, `rotation`, `fx`, `crop`을 각각 폼 필드로 보내기 (FE 2026-11-08 반영)
+- [ ] 방향 정리 후 JPEG로 다시 인코딩할 때 EXIF 초점거리가 남는지, 안 남는다면 `fx`를 보내 주실 수 있는지 (없으면 실제 AI가 실패해요)
+- [ ] 전체 원본이 10MB를 넘지 않는지
 - [ ] 폴링 간격 1~2초 괜찮은지
 - [ ] 에러별 화면이 "재시도 / 다시 찍기" 두 가지로 충분한지
 - [ ] 실패 화면에서 다시 찍기 / 닫기를 누를 때 discard 호출이 가능한지
@@ -184,6 +201,14 @@ failed일 때
 - `tags` 목록, `card_ids`를 채우는 조건
 
 ## 6. 변경 이력
+
+**v0.2 (2026-11-09)**
+
+- 앱이 크롭된 사진 대신 전체 원본과 `crop` 좌표를 보내요 (FE 변경 요청 2026-11-08)
+- 접수에 `crop` 필드 추가 (필수), 응답 `capture.crop` 추가
+- `rotation`은 항상 `0`, `w`, `h`는 방향 정리 후 실제 크기
+- 사진 크기·crop 범위 검증 추가 (실패 시 `422 INVALID_REQUEST`), 깨진 사진은 `400 UPLOAD_INVALID_FORMAT`
+- 시연 모드 결과 이미지를 `crop` 영역으로 자름
 
 **v0.1 (2026-11-04)**
 

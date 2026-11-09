@@ -1,6 +1,9 @@
+import io
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+from PIL import Image
 
 import files
 import store
@@ -25,7 +28,14 @@ def run(job_id: str) -> None:
         return
 
     photo_name = Path(job.photo).name
-    files.save("results", photo_name, files.load("uploads", photo_name))
+    data = files.load("uploads", photo_name)
+    crop = job.capture.crop
+    if crop:  # 실제 AI처럼 결과는 crop 영역만 내보낸다.
+        image = Image.open(io.BytesIO(data))
+        out = io.BytesIO()
+        image.crop((crop.x, crop.y, crop.x + crop.width, crop.y + crop.height)).save(out, image.format, quality=95)
+        data = out.getvalue()
+    files.save("results", photo_name, data)
     job.status = "done"
     job.result = JobResult(image_url=f"/results/{photo_name}", tags=[], card_ids=[])
     job.updated_at = datetime.now(KST)
