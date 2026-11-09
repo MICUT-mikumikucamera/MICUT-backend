@@ -1,14 +1,17 @@
+import io
 import secrets
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Form, UploadFile
+from PIL import Image
+from pydantic import ValidationError
 
 import fake_ai
 import files
 import store
 from errors import AppError
-from schemas import Capture, Job
+from schemas import Capture, Crop, Job
 
 router = APIRouter(prefix="/api/v1/jobs", tags=["jobs"])
 
@@ -48,7 +51,12 @@ def create_job(
     h: int = Form(),
     rotation: int = Form(),
     fx: float | None = Form(None),
+    crop: str = Form(),  # JSON 텍스트. Json[Crop]으로 받으면 FastAPI가 폼 필드 x, y, ...로 착각한다.
 ):
+    try:
+        crop = Crop.model_validate_json(crop)
+    except ValidationError:
+        raise AppError("INVALID_REQUEST")
     data = photo.file.read(MAX_SIZE + 1)
     if len(data) > MAX_SIZE:
         raise AppError("UPLOAD_TOO_LARGE")
@@ -58,6 +66,15 @@ def create_job(
         ext = ".png"
     else:
         raise AppError("UPLOAD_INVALID_FORMAT")
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            image.load()  # 끝까지 디코딩해서 잘린·깨진 파일을 여기서 거른다.
+            size = image.size
+    except (OSError, Image.DecompressionBombError):
+        raise AppError("UPLOAD_INVALID_FORMAT")
+    # 프런트가 EXIF 방향을 픽셀에 적용해서 보내므로 rotation은 항상 0이고, 서버는 회전하지 않는다.
+    if size != (w, h) or rotation != 0 or crop.x + crop.width > w or crop.y + crop.height > h:
+        raise AppError("INVALID_REQUEST")
 
     now = datetime.now(KST)
     job_id = f"j_{now:%Y%m%d}_{secrets.token_hex(6)}"
@@ -66,7 +83,7 @@ def create_job(
     job = Job(
         job_id=job_id,
         photo=f"/uploads/{job_id}{ext}",
-        capture=Capture(w=w, h=h, rotation=rotation, fx=fx),
+        capture=Capture(w=w, h=h, rotation=rotation, fx=fx, crop=crop),
         status="pending",
         attempt=1,
         result=None,
