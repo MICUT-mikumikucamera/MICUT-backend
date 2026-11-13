@@ -9,6 +9,7 @@ from httpx import HTTPError
 
 import files
 import store
+from routers import collection
 from errors import CODES
 from schemas import JobError, JobResult
 
@@ -83,6 +84,8 @@ def run(job_id: str) -> None:
         return
     job.status = "failed" if error else "done"
     job.result = None if error else result
+    if job.result:
+        job.result.card_ids, job.result.new_card_ids = collection.award(job)
     job.error = error
     job.updated_at = datetime.now(KST)
     store.save_job(job)

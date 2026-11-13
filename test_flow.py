@@ -147,6 +147,50 @@ jid = submit()
 make_failed(jid, hours_ago=23)
 assert c.post(f"/api/v1/jobs/{jid}/retry").status_code == 200
 
+# 컬렉션: done이 되면 서버가 카드 1장을 정하고, X-Device-Id를 보낸 기기의 컬렉션에 기록한다
+DEV = {"X-Device-Id": "dev-a"}
+
+
+def submit_as(headers):
+    r = c.post("/api/v1/jobs", files={"photo": ("a.jpg", JPG, "image/jpeg")}, data=FIELDS, headers=headers)
+    assert r.status_code == 201, r.text
+    assert "device_id" not in r.json()                      # 기기 ID는 응답에 안 나간다
+    return c.get(f"/api/v1/jobs/{r.json()['job_id']}").json()
+
+
+empty = c.get("/api/v1/collection", headers=DEV).json()
+assert empty["total"] == 12 and empty["acquired_count"] == 0
+assert [card["no"] for card in empty["cards"]] == list(range(1, 13))
+
+first = submit_as(DEV)
+assert "device_id" not in first
+card = first["result"]["card_ids"]
+assert len(card) == 1 and first["result"]["new_card_ids"] == card     # 첫 카드는 신규
+
+# 카드는 12장이라 13번 안에 반드시 같은 카드가 다시 나온다 → 신규 아님, 사진만 쌓인다
+seen = {card[0]: [first["job_id"]]}
+for _ in range(13):
+    job = submit_as(DEV)
+    cid = job["result"]["card_ids"][0]
+    assert job["result"]["new_card_ids"] == ([] if cid in seen else [cid])
+    seen.setdefault(cid, []).append(job["job_id"])
+col = c.get("/api/v1/collection", headers=DEV).json()
+assert col["acquired_count"] == len(seen)
+for entry in col["cards"]:
+    assert [ph["job_id"] for ph in entry["photos"]] == seen.get(entry["id"], [])
+
+# 다른 기기와는 섞이지 않고, 헤더 없이 찍으면 카드는 정해지지만 기록되지 않는다
+assert c.get("/api/v1/collection", headers={"X-Device-Id": "dev-b"}).json()["acquired_count"] == 0
+anon = submit_as({})
+assert len(anon["result"]["card_ids"]) == 1 and anon["result"]["new_card_ids"] == []
+
+# 기기 ID가 없거나 형식이 틀리면 422
+assert c.get("/api/v1/collection").json()["error"]["code"] == "INVALID_REQUEST"
+for bad in ["", "a b", "x" * 65, "a/b"]:
+    assert c.get("/api/v1/collection", headers={"X-Device-Id": bad}).status_code == 422, bad
+r = c.post("/api/v1/jobs", files={"photo": ("a.jpg", JPG, "image/jpeg")}, data=FIELDS, headers={"X-Device-Id": "a b"})
+assert r.status_code == 422
+
 store.conn.close()
 os.chdir(ROOT)
 shutil.rmtree(tmp, ignore_errors=True)

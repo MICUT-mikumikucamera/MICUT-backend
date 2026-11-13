@@ -1,0 +1,14 @@
+[
+  {"id": "gyaru_peace", "no": 1, "name": "갸루 피스"},
+  {"id": "v_sign", "no": 2, "name": "브이"},
+  {"id": "half_heart", "no": 3, "name": "반하트"},
+  {"id": "full_heart", "no": 4, "name": "완전 하트"},
+  {"id": "wave", "no": 5, "name": "손 인사"},
+  {"id": "miku_arms", "no": 6, "name": "미쿠 양팔"},
+  {"id": "kiss", "no": 7, "name": "뽀뽀"},
+  {"id": "cheek_poke", "no": 8, "name": "볼콕"},
+  {"id": "flower_pose", "no": 9, "name": "꽃받침"},
+  {"id": "gdg_pose", "no": 10, "name": "GDG 포즈"},
+  {"id": "alien_fingers", "no": 11, "name": "손가락으로 외계인 따라하기"},
+  {"id": "leek", "no": 12, "name": "대파 들기"}
+]

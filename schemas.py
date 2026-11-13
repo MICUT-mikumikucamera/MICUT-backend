@@ -3,6 +3,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+DEVICE_ID = r"^[A-Za-z0-9_-]{1,64}$"  # X-Device-Id 헤더 형식
+
 JobStatus = Literal["pending", "processing", "done", "failed"]
 
 
@@ -29,6 +31,7 @@ class JobResult(BaseModel):
     image_url: str
     tags: list[str]
     card_ids: list[str]
+    new_card_ids: list[str] = []  # card_ids 중 이 기기가 처음 얻은 카드. 2026-11-13 이전 작업에는 없다.
 
 
 class JobError(BaseModel):
@@ -47,3 +50,22 @@ class Job(BaseModel):
     error: JobError | None
     created_at: datetime
     updated_at: datetime
+    device_id: str | None = None  # 접수 때 받은 X-Device-Id. 응답에는 넣지 않는다.
+
+
+class CollectionPhoto(BaseModel):
+    job_id: str
+    acquired_at: datetime
+
+
+class CollectionCard(BaseModel):
+    id: str
+    no: int
+    name: str
+    photos: list[CollectionPhoto]
+
+
+class Collection(BaseModel):
+    acquired_count: int
+    total: int
+    cards: list[CollectionCard]
