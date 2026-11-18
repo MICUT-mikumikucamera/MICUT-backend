@@ -1,5 +1,5 @@
 import json
-import random
+import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Annotated
@@ -13,12 +13,18 @@ router = APIRouter(prefix="/api/v1/collection", tags=["collection"])
 
 KST = timezone(timedelta(hours=9))
 CARDS = json.loads((Path(__file__).resolve().parent.parent / "cards.json").read_text(encoding="utf-8"))
+CARD_IDS = {card["id"] for card in CARDS}
 
 
-def award(job: Job) -> tuple[list[str], list[str]]:
-    """done이 된 작업에 카드를 정하고 기기 컬렉션에 기록한다. (card_ids, new_card_ids)"""
-    # ponytail: 무작위 카드. AI가 미쿠의 포즈를 알려 주면 그 포즈의 카드로 교체
-    card_id = random.choice(CARDS)["id"]
+def award(job: Job, card_id: str | None) -> tuple[list[str], list[str]]:
+    """AI가 정한 카드를 기기 컬렉션에 기록한다. (card_ids, new_card_ids)
+
+    card_id가 None이면 컬렉션에 없는 포즈라 카드 없이 갤러리로만 간다.
+    """
+    if card_id not in CARD_IDS:
+        if card_id is not None:
+            logging.warning("cards.json에 없는 card_id %r (job %s)", card_id, job.job_id)
+        return [], []
     if job.device_id and store.add_acquisition(job.device_id, job.job_id, card_id, datetime.now(KST)):
         return [card_id], [card_id]
     return [card_id], []

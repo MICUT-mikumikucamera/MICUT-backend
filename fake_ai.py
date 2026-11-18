@@ -43,6 +43,12 @@ def run_pipeline(photo: Path, out: Path) -> JobError | None:
     return JobError(code="RENDER_FAILED", message=f"{labels[stage]} 단계에서 실패했어요.", retryable=True)
 
 
+def read_card_id(out: Path) -> str | None:
+    """AI가 정한 카드 id. 컬렉션에 없는 포즈면 None."""
+    # TODO(박유진): run.py 결과에서 card_id를 읽는다. 11/19 AI 연결 때 위치(파일, 키)를 정해 채운다.
+    return None
+
+
 def run(job_id: str) -> None:
     job = store.get_job(job_id)
     attempt = job.attempt
@@ -56,6 +62,7 @@ def run(job_id: str) -> None:
 
     error = None
     result = None
+    card_id = None
     try:
         with TemporaryDirectory(dir=".") as work:
             out = Path(work).resolve() / "output"  # run.py가 직접 생성한다.
@@ -74,6 +81,7 @@ def run(job_id: str) -> None:
                 name = f"{job_id}-{attempt}.png"
                 files.save("results", name, image.read_bytes())
                 result = JobResult(image_url=f"/results/{name}", tags=[], card_ids=[])
+                card_id = read_card_id(out)
     except KeyError as exc:
         error = JobError(code="INTERNAL_ERROR", message=f"서버에 {exc.args[0]} 설정이 없어요.", retryable=True)
     except (OSError, ValueError, HTTPError):
@@ -85,7 +93,7 @@ def run(job_id: str) -> None:
     job.status = "failed" if error else "done"
     job.result = None if error else result
     if job.result:
-        job.result.card_ids, job.result.new_card_ids = collection.award(job)
+        job.result.card_ids, job.result.new_card_ids = collection.award(job, card_id)
     job.error = error
     job.updated_at = datetime.now(KST)
     store.save_job(job)
