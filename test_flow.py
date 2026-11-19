@@ -147,6 +147,49 @@ jid = submit()
 make_failed(jid, hours_ago=23)
 assert c.post(f"/api/v1/jobs/{jid}/retry").status_code == 200
 
+# 컬렉션: done이 되면 AI가 정한 card_id를 X-Device-Id를 보낸 기기의 컬렉션에 기록한다
+DEV = {"X-Device-Id": "dev-a"}
+
+
+def submit_as(headers, card_id):
+    fake_ai.read_card_id = lambda out: card_id
+    r = c.post("/api/v1/jobs", files={"photo": ("a.jpg", JPG, "image/jpeg")}, data=FIELDS, headers=headers)
+    assert r.status_code == 201, r.text
+    assert "device_id" not in r.json()                      # 기기 ID는 응답에 안 나간다
+    job = c.get(f"/api/v1/jobs/{r.json()['job_id']}").json()
+    assert job["status"] == "done"
+    return job["job_id"], job["result"]["card_ids"], job["result"]["new_card_ids"]
+
+
+empty = c.get("/api/v1/collection", headers=DEV).json()
+assert empty["total"] == 12 and empty["acquired_count"] == 0
+assert [card["no"] for card in empty["cards"]] == list(range(1, 13))
+
+v1, cards, new = submit_as(DEV, "v_sign")
+assert cards == ["v_sign"] and new == ["v_sign"]                        # 처음 얻은 카드는 신규
+v2, cards, new = submit_as(DEV, "v_sign")
+assert cards == ["v_sign"] and new == []                                # 같은 카드는 신규 아님
+k1, cards, new = submit_as(DEV, "kiss")
+assert cards == ["kiss"] and new == ["kiss"]
+assert submit_as(DEV, None)[1:] == ([], [])                             # 컬렉션에 없는 포즈 → 카드 없음
+assert submit_as(DEV, "COL_V")[1:] == ([], [])                          # cards.json에 없는 id도 카드 없음
+col = c.get("/api/v1/collection", headers=DEV).json()
+assert col["acquired_count"] == 2
+photos = {card["id"]: [ph["job_id"] for ph in card["photos"]] for card in col["cards"]}
+assert photos["v_sign"] == [v1, v2] and photos["kiss"] == [k1]          # 사진은 얻은 순서로 쌓인다
+assert sum(map(len, photos.values())) == 3
+
+# 다른 기기와는 섞이지 않고, 헤더 없이 찍으면 card_ids는 오지만 기록되지 않는다
+assert c.get("/api/v1/collection", headers={"X-Device-Id": "dev-b"}).json()["acquired_count"] == 0
+assert submit_as({}, "leek")[1:] == (["leek"], [])
+
+# 기기 ID가 없거나 형식이 틀리면 422
+assert c.get("/api/v1/collection").json()["error"]["code"] == "INVALID_REQUEST"
+for bad in ["", "a b", "x" * 65, "a/b"]:
+    assert c.get("/api/v1/collection", headers={"X-Device-Id": bad}).status_code == 422, bad
+r = c.post("/api/v1/jobs", files={"photo": ("a.jpg", JPG, "image/jpeg")}, data=FIELDS, headers={"X-Device-Id": "a b"})
+assert r.status_code == 422
+
 store.conn.close()
 os.chdir(ROOT)
 shutil.rmtree(tmp, ignore_errors=True)
