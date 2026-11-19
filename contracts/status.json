@@ -1,5 +1,5 @@
 {
-    "description": "작업(job)의 상태값. 이 4개 외의 값은 쓰지 않는다. 전부 소문자.",
+    "description": "작업(job)의 상태값. 이 5개 외의 값은 쓰지 않는다. 전부 소문자.",
     "values": {
         "pending": {
             "meaning": "접수됨, 시작 전",
@@ -9,6 +9,12 @@
         },
         "processing": {
             "meaning": "AI 실행 중",
+            "set_by": "ai",
+            "result": "null",
+            "error": "null"
+        },
+        "awaiting_person": {
+            "meaning": "사람 인식 끝, 사용자의 인물 선택을 기다림",
             "set_by": "ai",
             "result": "null",
             "error": "null"
@@ -28,6 +34,8 @@
     },
     "transitions": [
         "pending -> processing",
+        "processing -> awaiting_person",
+        "awaiting_person -> processing",
         "processing -> done",
         "processing -> failed",
         "failed -> pending"
@@ -42,6 +50,9 @@
         "원본 사진 삭제는 앱 연결이 담당한다. done이나 retryable이 false인 failed를 확인하면 삭제한다.",
         "retryable이 true인 failed는 재시도에 필요하므로 원본을 보관하고, app이 discard를 호출하면 삭제한다.",
         "discard하면 error.retryable을 false로 바꾼다. 그래서 이후 재시도는 기존 규칙에 따라 불가능하다.",
-        "app이 discard를 호출하지 않아도, retryable이 true인 failed가 updated_at부터 24시간 지나면 앱 연결이 discard와 똑같이 처리한다."
+        "app이 discard를 호출하지 않아도, retryable이 true인 failed가 updated_at부터 24시간 지나면 앱 연결이 discard와 똑같이 처리한다.",
+        "사람이 1명 이상이면 합성 전에 awaiting_person에서 멈춘다. 0명이면 person을 solo로 정하고 바로 합성한다.",
+        "awaiting_person에서 app이 인물 선택을 받으면 person을 채우고 processing으로 바꾼다.",
+        "재시도할 때 person이 이미 있으면 사람 인식과 선택을 건너뛰고 그 사람으로 다시 합성한다."
     ]
 }

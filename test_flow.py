@@ -25,7 +25,7 @@ from PIL import Image  # noqa: E402
 import fake_ai  # noqa: E402
 import store  # noqa: E402
 from main import app  # noqa: E402
-from schemas import Job, JobError  # noqa: E402
+from schemas import Job, JobError, People, Person  # noqa: E402
 
 c = TestClient(app)
 buf = io.BytesIO()
@@ -41,14 +41,21 @@ def post(photo=JPG, **changes):
 
 
 # API 흐름 테스트에서는 외부 AI 대신 테스트용 합성 결과를 쓴다.
-def stub_pipeline(photo, out):
+piped = []  # 합성에 넘긴 사람 (Person)
+
+
+def stub_pipeline(photo, out, person):
     assert photo.read_bytes() == JPG
+    piped.append(person)
     image = out / "composite" / "composite_depth.png"
     image.parent.mkdir(parents=True)
     shutil.copyfile(ROOT / "samples" / "cafe-composite.png", image)
 
 
 fake_ai.run_pipeline = stub_pipeline
+# 인물 선택 전의 흐름 테스트는 사람이 없는 사진으로 한다 (선택 없이 바로 done). 인물 선택은 아래에서 따로.
+fake_people = fake_ai.detect_people
+fake_ai.detect_people = lambda photo: People(status="no_person", people=[])
 
 
 def submit():
@@ -189,6 +196,65 @@ for bad in ["", "a b", "x" * 65, "a/b"]:
     assert c.get("/api/v1/collection", headers={"X-Device-Id": bad}).status_code == 422, bad
 r = c.post("/api/v1/jobs", files={"photo": ("a.jpg", JPG, "image/jpeg")}, data=FIELDS, headers={"X-Device-Id": "a b"})
 assert r.status_code == 422
+
+# 사람이 없으면 선택 없이 solo로 합성된다
+job = c.get(f"/api/v1/jobs/{submit()}").json()
+assert job["status"] == "done" and job["person"] == {"mode": "solo", "person_id": None}
+assert job["people"]["people"] == [] and piped[-1] == Person(mode="solo")
+
+# 사람이 있으면 awaiting_person에서 멈추고 people을 보여 준다. 원본은 남아 있다.
+fake_ai.detect_people = fake_people
+jid = submit()
+job = c.get(f"/api/v1/jobs/{jid}").json()
+assert job["status"] == "awaiting_person" and job["person"] is None and job["result"] is None
+assert job["people"]["recommended_person_id"] == "p0"
+assert [(p["person_id"], p["eligible"]) for p in job["people"]["people"]] == [("p0", True), ("p1", False)]
+assert job["people"]["people"][1]["reason"] == "too_small"
+assert photo_exists(jid)
+
+
+def select(job_id, body):
+    return c.post(f"/api/v1/jobs/{job_id}/person", json=body)
+
+
+# 잘못된 선택은 422, 작업은 그대로 기다린다
+for bad in [{"mode": "human", "person_id": "p1"},       # eligible false
+            {"mode": "human", "person_id": "p9"},       # 없는 사람
+            {"mode": "human", "person_id": None},
+            {"mode": "solo", "person_id": "p0"},
+            {"mode": "copy", "person_id": "p0"},
+            {}]:
+    r = select(jid, bad)
+    assert r.status_code == 422 and r.json()["error"]["code"] == "INVALID_REQUEST", (bad, r.text)
+assert c.get(f"/api/v1/jobs/{jid}").json()["status"] == "awaiting_person"
+assert c.post(f"/api/v1/jobs/{jid}/retry").status_code == 409            # 선택 대기는 재시도 대상 아님
+
+# 고르면 processing으로 돌려주고, 그 사람으로 합성해 done
+r = select(jid, {"mode": "human", "person_id": "p0"})
+assert r.status_code == 200, r.text
+assert r.json()["status"] == "processing" and r.json()["person"] == {"mode": "human", "person_id": "p0"}
+assert "device_id" not in r.json()
+job = c.get(f"/api/v1/jobs/{jid}").json()
+assert job["status"] == "done" and piped[-1] == Person(mode="human", person_id="p0")
+
+# 이미 고른 작업, 없는 작업
+r = select(jid, {"mode": "human", "person_id": "p0"})
+assert r.status_code == 409 and r.json()["error"]["code"] == "PERSON_SELECT_NOT_ALLOWED"
+assert select("nope", {"mode": "solo", "person_id": None}).status_code == 404
+
+# 따라 하지 않기
+jid = submit()
+assert select(jid, {"mode": "solo", "person_id": None}).status_code == 200
+assert c.get(f"/api/v1/jobs/{jid}").json()["status"] == "done" and piped[-1] == Person(mode="solo")
+
+# 합성 실패 뒤 재시도: 사람 인식·선택 없이 처음 고른 사람으로 다시 합성
+jid = submit()
+select(jid, {"mode": "human", "person_id": "p0"})
+make_failed(jid)
+fake_ai.detect_people = lambda photo: (_ for _ in ()).throw(AssertionError("인식을 다시 하면 안 됨"))
+assert c.post(f"/api/v1/jobs/{jid}/retry").status_code == 200
+job = c.get(f"/api/v1/jobs/{jid}").json()
+assert job["status"] == "done" and job["person"]["person_id"] == "p0" and piped[-1].person_id == "p0"
 
 store.conn.close()
 os.chdir(ROOT)

@@ -44,6 +44,13 @@
       "fe_action": "retake",
       "http": 409
     },
+    "PERSON_SELECT_NOT_ALLOWED": {
+      "stage": "app",
+      "retryable": false,
+      "message": "지금은 인물을 고를 수 없는 작업이에요",
+      "fe_action": "retake",
+      "http": 409
+    },
     "PERSON_NOT_FOUND": {
       "stage": "ai",
       "retryable": false,

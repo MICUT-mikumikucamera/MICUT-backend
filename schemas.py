@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 DEVICE_ID = r"^[A-Za-z0-9_-]{1,64}$"  # X-Device-Id 헤더 형식
 
-JobStatus = Literal["pending", "processing", "done", "failed"]
+JobStatus = Literal["pending", "processing", "awaiting_person", "done", "failed"]
 
 
 class Crop(BaseModel):
@@ -40,11 +40,39 @@ class JobError(BaseModel):
     retryable: bool
 
 
+class DetectedPerson(BaseModel):
+    model_config = ConfigDict(extra="allow")  # AI가 더 보내는 필드도 그대로 전달한다.
+
+    person_id: str
+    bbox_norm: list[float]  # [왼쪽, 위, 오른쪽, 아래], 보낸 사진 크기 대비 0~1
+    eligible: bool
+    reason: str | None = None
+
+
+class People(BaseModel):
+    """AI 사람 인식 결과 (people.json)"""
+
+    model_config = ConfigDict(extra="allow")
+
+    status: str
+    recommended_person_id: str | None = None
+    people: list[DetectedPerson]
+
+
+class Person(BaseModel):
+    """미쿠가 따라 할 사람. solo면 아무도 따라 하지 않는다."""
+
+    mode: Literal["human", "solo"]
+    person_id: str | None = None
+
+
 class Job(BaseModel):
     job_id: str
     photo: str
     capture: Capture
     status: JobStatus
+    people: People | None = None  # 사람 인식 전에는 None. 2026-11-19 이전 작업에는 없다.
+    person: Person | None = None  # 고르기 전에는 None
     attempt: int
     result: JobResult | None
     error: JobError | None
