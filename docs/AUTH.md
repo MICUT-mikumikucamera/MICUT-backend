@@ -1,18 +1,18 @@
 # MiCut 로그인 API (초안)
 
-2026-11-20 기준 · **초안이에요.** FE `feat/auth-onboarding`의 `AuthRepository`에 맞춰 썼고, 확정되면 `docs/API.md`에 합칠게요.
+2026-11-25 기준 · **초안이에요.** FE `main`의 `AuthGateway`(`lib/features/auth/auth_providers.dart`)에 맞춰 썼고, 확정되면 `docs/API.md`에 합칠게요.
 
 ## 요약
 
-| 구분 | API | 앱 쪽 (`AuthRepository`) |
+| 구분 | API | 앱 쪽 |
 | --- | --- | --- |
-| 신규 | `POST /api/v1/auth/google` | `signInWithGoogle()` |
-| 신규 | `GET /api/v1/me` | `restore()`, `nickname()` |
-| 신규 | `GET /api/v1/nicknames/check` | `checkNickname()` |
-| 신규 | `PUT /api/v1/me/nickname` | `saveNickname()` |
-| 신규 | `POST /api/v1/me/terms` | `agreeTerms()` |
-| 신규 | `POST /api/v1/auth/logout` | `signOut()` |
+| 신규 | `POST /api/v1/auth/google` | `AuthGateway.signInWithGoogle()` |
+| 신규 | `POST /api/v1/me/onboarding` | `AuthGateway.completeOnboarding()` |
+| 신규 | `GET /api/v1/me` | 앱을 켤 때 저장된 토큰 확인 (세션 복원) |
+| 신규 | `POST /api/v1/auth/logout` | 설정의 로그아웃 |
 | 변경 | `POST /api/v1/jobs`, `GET /api/v1/collection` | 로그인했으면 `X-Device-Id` 대신 계정 기준으로 컬렉션을 쌓아요 |
+
+`GET /me`와 로그아웃은 지금 `AuthGateway`에 없어요. 앱 재실행과 세션 만료 화면에 필요해서 넣었어요.
 
 로그인하지 않은 지금 앱도 그대로 동작해요 (`X-Device-Id` 방식 유지).
 
@@ -24,25 +24,21 @@
 2. ID token을 `POST /api/v1/auth/google`로 보내면 서버가 **우리 토큰**(`token`)을 줘요.
 3. 이후 로그인이 필요한 요청에는 `Authorization: Bearer <token>` 헤더를 붙여 주세요. 구글 ID token은 처음 한 번만 보내요.
 
-- `token`은 기기에 안전하게 저장해 주세요 (예: `flutter_secure_storage`). 앱을 켤 때 이 토큰으로 `GET /api/v1/me`를 부르면 `restore()`가 돼요.
+- `token`은 기기에 안전하게 저장해 주세요 (예: `flutter_secure_storage`).
 - `token`은 **90일** 뒤 만료돼요. 만료되거나 로그아웃한 토큰을 보내면 `401 UNAUTHORIZED`가 와요. 이때 세션 만료 화면을 보여 주고 다시 구글 로그인을 하면 돼요.
 
-## 2. 로그인 단계 `status`
+## 2. 공통 응답
 
-로그인 관련 응답에는 모두 `status`와 `nickname`이 와요.
+로그인 관련 응답에는 모두 이 두 필드가 와요.
 
 ```json
-{ "status": "needs_nickname", "nickname": null }
+{ "needs_onboarding": true, "nickname": null }
 ```
 
-| `status` | 앱 `AuthStatus` | 다음 화면 |
-| --- | --- | --- |
-| `needs_nickname` | `needsNickname` | 00-1 닉네임 |
-| `needs_terms` | `needsTerms` | 00-2 이용약관 |
-| `signed_in` | `signedIn` | 홈 |
-
-- `signedOut`은 앱에 `token`이 없는 상태라 서버가 주지 않아요.
-- `sessionExpired`는 `401 UNAUTHORIZED`를 받았을 때예요.
+| 필드 | 설명 |
+| --- | --- |
+| `needs_onboarding` | `true`면 닉네임 → 약관 화면으로, `false`면 홈으로 |
+| `nickname` | 온보딩 전이면 `null` |
 
 ## 3. API
 
@@ -59,53 +55,43 @@
 응답 `200`
 
 ```json
-{ "status": "needs_nickname", "nickname": null, "token": "q1w2e3..." }
+{ "needs_onboarding": true, "nickname": null, "token": "q1w2e3..." }
 ```
 
-- 처음 로그인이면 `needs_nickname`이에요. 이미 가입한 계정이면 저장된 단계(보통 `signed_in`)가 와요.
+- 처음 로그인이면 `needs_onboarding: true`예요. 온보딩을 마친 계정이면 `false`예요.
+- `signInWithGoogle()`의 반환값은 `needs_onboarding`을 그대로 쓰면 돼요.
 - 실패: `401 UNAUTHORIZED` (가짜, 만료, 다른 앱용 ID token), `422 INVALID_REQUEST` (`id_token` 없음)
 
-### 내 정보 `GET /api/v1/me`
-
-헤더 `Authorization` (필수) · 응답 `200` `{ "status": "signed_in", "nickname": "미쿠짱" }`
-
-실패: `401 UNAUTHORIZED`
-
-### 닉네임 확인 `GET /api/v1/nicknames/check?nickname=미쿠짱`
+### 온보딩 완료 `POST /api/v1/me/onboarding`
 
 헤더 `Authorization` (필수)
 
-응답 `200`
+요청 (JSON)
 
 ```json
-{ "available": false, "issue": "taken" }
+{ "nickname": "미쿠짱", "terms_accepted": true, "privacy_accepted": true }
 ```
 
-| `issue` | 앱 `NicknameIssue` |
-| --- | --- |
-| `null` | 사용 가능 |
-| `too_short` | `tooShort` (2자 미만) |
-| `too_long` | `tooLong` (20자 초과) |
-| `has_whitespace` | `hasWhitespace` |
-| `has_emoji` | `hasEmoji` |
-| `taken` | `taken` (다른 사람이 사용 중이거나 예약어) |
+응답 `200` `{ "needs_onboarding": false, "nickname": "미쿠짱" }`
 
-- 규칙은 앱의 `validateNickname`과 같아요. 서버도 같은 순서(공백 → 이모지 → 길이 → 중복)로 확인해요.
+- 닉네임 규칙은 앱의 `NicknameRules`와 같아요: 2~20자, 공백과 보이지 않는 문자 불가, 이모지 불가.
 - 대소문자만 다른 닉네임은 같은 닉네임으로 봐요 (`Miku` = `miku`).
-- 지금 내 닉네임은 `taken`이 아니에요.
+- 이용약관과 개인정보 동의 시각을 서버에 따로 기록해요.
+- 다시 부르면 닉네임만 바뀌고 동의 시각은 처음 것이 남아요. 나중에 설정에서 닉네임을 바꿀 때도 쓸 수 있어요.
 
-### 닉네임 저장 `PUT /api/v1/me/nickname`
+| 실패 | 언제 | 앱 동작 |
+| --- | --- | --- |
+| `409 NICKNAME_TAKEN` | 다른 사람이 쓰는 닉네임이거나 예약어(관리자, 운영자, admin, micut, 미컷, 미쿠) | 닉네임 화면으로 돌아가 중복 에러 표시 |
+| `422 INVALID_REQUEST` | 닉네임 규칙 위반, 또는 동의 둘 중 하나라도 `false` | 앱에서 미리 막으므로 보통 오지 않아요 |
+| `401 UNAUTHORIZED` | 토큰이 없거나 만료 | 세션 만료 화면 |
 
-헤더 `Authorization` (필수) · 요청 `{ "nickname": "미쿠짱" }` · 응답 `200` `{ "status": "needs_terms", "nickname": "미쿠짱" }`
+실패하면 아무것도 저장되지 않아요.
 
-- 나중에 설정에서 닉네임을 바꿀 때도 같은 API를 써요.
-- 실패: `409 NICKNAME_TAKEN` (확인 뒤 다른 사람이 먼저 가져감), `422 INVALID_REQUEST` (규칙 위반), `401 UNAUTHORIZED`
+### 내 정보 `GET /api/v1/me`
 
-### 약관 동의 `POST /api/v1/me/terms`
+헤더 `Authorization` (필수) · 응답 `200` `{ "needs_onboarding": false, "nickname": "미쿠짱" }`
 
-헤더 `Authorization` (필수) · 본문 없음 · 응답 `200` `{ "status": "signed_in", "nickname": "미쿠짱" }`
-
-동의한 시각을 서버에 기록해요. 여러 번 불러도 처음 시각이 남아요.
+앱을 켤 때 저장된 토큰이 있으면 불러 주세요. `401`이면 세션 만료, `needs_onboarding: true`면 온보딩 화면이에요.
 
 ### 로그아웃 `POST /api/v1/auth/logout`
 
@@ -130,5 +116,5 @@
 ## 6. 아직 정하지 않은 것
 
 - **회원 탈퇴:** 구글 플레이는 계정을 만들 수 있는 앱에 앱 안 계정 삭제 기능을 요구해요. 출시 전에 추가해야 해요.
-- **약관 항목:** 필수/선택(마케팅 등) 항목이 나뉘면 동의 항목을 받도록 바꿀게요. 지금은 "전체 동의" 한 번이에요.
+- **선택 동의:** 마케팅 수신 같은 선택 항목이 생기면 요청에 필드를 추가할게요.
 - **로그인 필수 여부:** 로그인하지 않고도 쓸 수 있는지(게스트)에 따라 `X-Device-Id`를 남길지 정해요.

@@ -71,12 +71,8 @@ class Collection(BaseModel):
     cards: list[CollectionCard]
 
 
-AuthStatus = Literal["needs_nickname", "needs_terms", "signed_in"]
-NicknameIssue = Literal["too_short", "too_long", "has_whitespace", "has_emoji", "taken"]
-
-
 class Me(BaseModel):
-    status: AuthStatus
+    needs_onboarding: bool  # 닉네임·약관 동의 전이면 true
     nickname: str | None
 
 
@@ -88,10 +84,7 @@ class GoogleLogin(BaseModel):
     id_token: str
 
 
-class NicknameBody(BaseModel):
+class Onboarding(BaseModel):
     nickname: str
-
-
-class NicknameCheck(BaseModel):
-    available: bool
-    issue: NicknameIssue | None
+    terms_accepted: bool
+    privacy_accepted: bool

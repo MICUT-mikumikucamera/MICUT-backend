@@ -13,7 +13,7 @@ from google.oauth2 import id_token
 
 import store
 from errors import AppError
-from schemas import DEVICE_ID, GoogleLogin, Login, Me, NicknameBody, NicknameCheck, NicknameIssue
+from schemas import DEVICE_ID, GoogleLogin, Login, Me, Onboarding
 
 router = APIRouter(prefix="/api/v1", tags=["auth"])
 
@@ -23,8 +23,10 @@ GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")  # Google Cloud의 Web 클
 SESSION_DAYS = 90
 NICKNAME_MIN, NICKNAME_MAX = 2, 20
 RESERVED = {"관리자", "운영자", "admin", "micut", "미컷", "미쿠"}
-# 앱(nickname_validator.dart)과 같은 범위
-EMOJI = re.compile("[\U0001F000-\U0001FAFF←-⇿⌀-⏿☀-➿⬀-⯿️‍⃣]")
+# 앱(nickname_rules.dart)과 같은 문자: 공백·보이지 않는 문자, 이모지
+BLANK = re.compile("[\\s​‌‍﻿]")
+EMOJI = re.compile("[\U0001F000-\U0001FAFF☀-➿⌀-⏿⬀-⯿️⃣"
+                   "©®‼⁉™ℹ〰〽㊗㊙]")
 
 bearer = HTTPBearer(auto_error=False)  # Swagger에 Authorize 버튼이 생긴다.
 Bearer = Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)]
@@ -71,25 +73,14 @@ def owner(user_id: Annotated[str | None, Depends(optional_user)], x_device_id: D
 
 
 def me(user_id: str) -> Me:
-    nickname, terms_agreed_at = store.run("SELECT nickname, terms_agreed_at FROM users WHERE user_id = ?", (user_id,))[0]
-    status = "needs_nickname" if nickname is None else "needs_terms" if terms_agreed_at is None else "signed_in"
-    return Me(status=status, nickname=nickname)
+    nickname, terms, privacy = store.run(
+        "SELECT nickname, terms_agreed_at, privacy_agreed_at FROM users WHERE user_id = ?", (user_id,))[0]
+    return Me(needs_onboarding=None in (nickname, terms, privacy), nickname=nickname)
 
 
 # ponytail: 길이는 NFC 정규화 후 코드 포인트 수로 센다. 결합 문자가 섞이면 앱(글자 수)과 다를 수 있음
-def nickname_issue(nickname: str, user_id: str) -> NicknameIssue | None:
-    if re.search(r"\s", nickname):
-        return "has_whitespace"
-    if EMOJI.search(nickname):
-        return "has_emoji"
-    if len(nickname) < NICKNAME_MIN:
-        return "too_short"
-    if len(nickname) > NICKNAME_MAX:
-        return "too_long"
-    key = nickname.casefold()
-    if key in RESERVED or store.run("SELECT 1 FROM users WHERE nickname_key = ? AND user_id <> ?", (key, user_id)):
-        return "taken"
-    return None
+def valid_nickname(nickname: str) -> bool:
+    return not BLANK.search(nickname) and not EMOJI.search(nickname) and NICKNAME_MIN <= len(nickname) <= NICKNAME_MAX
 
 
 @router.post("/auth/google", response_model=Login)
@@ -120,30 +111,20 @@ def read_me(user_id: User):
     return me(user_id)
 
 
-@router.get("/nicknames/check", response_model=NicknameCheck)
-def check_nickname(nickname: str, user_id: User):
-    issue = nickname_issue(unicodedata.normalize("NFC", nickname), user_id)
-    return NicknameCheck(available=issue is None, issue=issue)
-
-
-@router.put("/me/nickname", response_model=Me)
-def save_nickname(body: NicknameBody, user_id: User):
+@router.post("/me/onboarding", response_model=Me)
+def complete_onboarding(body: Onboarding, user_id: User):
+    """닉네임과 필수 동의 두 개를 한 번에 저장한다. 다시 부르면 닉네임만 바뀌고 동의 시각은 처음 것이 남는다."""
     nickname = unicodedata.normalize("NFC", body.nickname)
-    issue = nickname_issue(nickname, user_id)
-    if issue == "taken":
-        raise AppError("NICKNAME_TAKEN")
-    if issue:
+    if not (body.terms_accepted and body.privacy_accepted and valid_nickname(nickname)):
         raise AppError("INVALID_REQUEST")
-    try:
-        store.run("UPDATE users SET nickname = ?, nickname_key = ? WHERE user_id = ?",
-                  (nickname, nickname.casefold(), user_id))
-    except store.Conflict:  # 확인과 저장 사이에 다른 사람이 먼저 가져간 경우
+    key = nickname.casefold()
+    if key in RESERVED:
         raise AppError("NICKNAME_TAKEN")
-    return me(user_id)
-
-
-@router.post("/me/terms", response_model=Me)
-def agree_terms(user_id: User):
-    store.run("UPDATE users SET terms_agreed_at = ? WHERE user_id = ? AND terms_agreed_at IS NULL",
-              (datetime.now(KST).isoformat(), user_id))
+    now = datetime.now(KST).isoformat()
+    try:
+        store.run("""UPDATE users SET nickname = ?, nickname_key = ?,
+                     terms_agreed_at = COALESCE(terms_agreed_at, ?), privacy_agreed_at = COALESCE(privacy_agreed_at, ?)
+                     WHERE user_id = ?""", (nickname, key, now, now, user_id))
+    except store.Conflict:  # 다른 계정이 이미 쓰는 닉네임 (nickname_key UNIQUE)
+        raise AppError("NICKNAME_TAKEN")
     return me(user_id)

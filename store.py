@@ -12,7 +12,8 @@ CREATE_ACQUISITIONS = """CREATE TABLE IF NOT EXISTS acquisitions (
     PRIMARY KEY (device_id, job_id, card_id))"""
 # 로그인: 계정(user_id = "google:<구글 sub>")과 세션. 세션 토큰은 해시만 저장한다.
 CREATE_USERS = """CREATE TABLE IF NOT EXISTS users (
-    user_id TEXT PRIMARY KEY, nickname TEXT, nickname_key TEXT UNIQUE, terms_agreed_at TEXT, created_at TEXT NOT NULL)"""
+    user_id TEXT PRIMARY KEY, nickname TEXT, nickname_key TEXT UNIQUE,
+    terms_agreed_at TEXT, privacy_agreed_at TEXT, created_at TEXT NOT NULL)"""
 CREATE_SESSIONS = """CREATE TABLE IF NOT EXISTS sessions (
     token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires_at TEXT NOT NULL)"""
 TABLES = [CREATE_TABLE, CREATE_ACQUISITIONS, CREATE_USERS, CREATE_SESSIONS]
