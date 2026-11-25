@@ -50,7 +50,7 @@ class Job(BaseModel):
     error: JobError | None
     created_at: datetime
     updated_at: datetime
-    device_id: str | None = None  # 접수 때 받은 X-Device-Id. 응답에는 넣지 않는다.
+    device_id: str | None = None  # 컬렉션 주인: 접수 때 로그인한 계정, 아니면 X-Device-Id. 응답에는 넣지 않는다.
 
 
 class CollectionPhoto(BaseModel):
@@ -69,3 +69,29 @@ class Collection(BaseModel):
     acquired_count: int
     total: int
     cards: list[CollectionCard]
+
+
+AuthStatus = Literal["needs_nickname", "needs_terms", "signed_in"]
+NicknameIssue = Literal["too_short", "too_long", "has_whitespace", "has_emoji", "taken"]
+
+
+class Me(BaseModel):
+    status: AuthStatus
+    nickname: str | None
+
+
+class Login(Me):
+    token: str  # 이후 요청에 Authorization: Bearer <token>
+
+
+class GoogleLogin(BaseModel):
+    id_token: str
+
+
+class NicknameBody(BaseModel):
+    nickname: str
+
+
+class NicknameCheck(BaseModel):
+    available: bool
+    issue: NicknameIssue | None

@@ -10,6 +10,12 @@ CREATE_TABLE = "CREATE TABLE IF NOT EXISTS jobs (job_id TEXT PRIMARY KEY, data T
 CREATE_ACQUISITIONS = """CREATE TABLE IF NOT EXISTS acquisitions (
     device_id TEXT NOT NULL, job_id TEXT NOT NULL, card_id TEXT NOT NULL, acquired_at TEXT NOT NULL,
     PRIMARY KEY (device_id, job_id, card_id))"""
+# 로그인: 계정(user_id = "google:<구글 sub>")과 세션. 세션 토큰은 해시만 저장한다.
+CREATE_USERS = """CREATE TABLE IF NOT EXISTS users (
+    user_id TEXT PRIMARY KEY, nickname TEXT, nickname_key TEXT UNIQUE, terms_agreed_at TEXT, created_at TEXT NOT NULL)"""
+CREATE_SESSIONS = """CREATE TABLE IF NOT EXISTS sessions (
+    token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires_at TEXT NOT NULL)"""
+TABLES = [CREATE_TABLE, CREATE_ACQUISITIONS, CREATE_USERS, CREATE_SESSIONS]
 
 if DATABASE_URL:
     # 배포 서버: Supabase PostgreSQL. 서버가 재시작돼도 기록이 남는다.
@@ -23,9 +29,17 @@ if DATABASE_URL:
         kwargs={"autocommit": True, "prepare_threshold": None},
         check=ConnectionPool.check_connection,
     )
+    from psycopg.errors import UniqueViolation as Conflict
+
     with pool.connection() as conn:
-        conn.execute(CREATE_TABLE)
-        conn.execute(CREATE_ACQUISITIONS)
+        for sql in TABLES:
+            conn.execute(sql)
+
+    def run(sql: str, params: tuple = ()) -> list[tuple]:
+        """SQL 한 문장 실행. 자리 표시는 SQLite처럼 ?로 쓴다."""
+        with pool.connection() as conn:
+            cur = conn.execute(sql.replace("?", "%s"), params)
+            return cur.fetchall() if cur.description else []
 
     def save_job(job: Job) -> None:
         with pool.connection() as conn:
@@ -62,8 +76,14 @@ else:
     # 내 PC 개발용: SQLite 파일 하나.
     # ponytail: 연결 하나를 모든 요청이 같이 씀. 동시 요청이 많아지면 요청마다 연결하거나 다른 DB로 교체
     conn = sqlite3.connect("micut.db", check_same_thread=False)
-    conn.execute(CREATE_TABLE)
-    conn.execute(CREATE_ACQUISITIONS)
+    for sql in TABLES:
+        conn.execute(sql)
+    Conflict = sqlite3.IntegrityError
+
+    def run(sql: str, params: tuple = ()) -> list[tuple]:
+        rows = conn.execute(sql, params).fetchall()
+        conn.commit()
+        return rows
 
     def save_job(job: Job) -> None:
         conn.execute("INSERT OR REPLACE INTO jobs VALUES (?, ?)", (job.job_id, job.model_dump_json()))
