@@ -21,6 +21,7 @@
 | `DATABASE_URL` | Supabase Session pooler 연결 문자열 |
 | `SUPABASE_URL`, `SUPABASE_KEY` | Supabase 프로젝트 주소와 service_role 키 (서버 전용, 앱에 넣지 않기) |
 | `SUPABASE_BUCKET` | Storage 공개 버킷 이름 (기본 `micut`) |
+| `GOOGLE_CLIENT_ID` | 구글 로그인 토큰을 검증할 Web OAuth 클라이언트 ID (앱의 `serverClientId`와 같은 값) |
 
 ## 처음 한 번: 설치
 

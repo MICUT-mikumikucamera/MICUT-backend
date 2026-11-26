@@ -81,6 +81,20 @@
       "message": "미쿠를 그리는 중에 문제가 생겼어요",
       "fe_action": "retry"
     },
+    "UNAUTHORIZED": {
+      "stage": "auth",
+      "retryable": false,
+      "message": "다시 로그인해 주세요",
+      "fe_action": "login",
+      "http": 401
+    },
+    "NICKNAME_TAKEN": {
+      "stage": "auth",
+      "retryable": false,
+      "message": "이미 사용 중인 닉네임이에요",
+      "fe_action": "edit_nickname",
+      "http": 409
+    },
     "INTERNAL_ERROR": {
       "stage": "any",
       "retryable": true,

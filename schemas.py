@@ -78,7 +78,7 @@ class Job(BaseModel):
     error: JobError | None
     created_at: datetime
     updated_at: datetime
-    device_id: str | None = None  # 접수 때 받은 X-Device-Id. 응답에는 넣지 않는다.
+    device_id: str | None = None  # 컬렉션 주인: 접수 때 로그인한 계정, 아니면 X-Device-Id. 응답에는 넣지 않는다.
 
 
 class CollectionPhoto(BaseModel):
@@ -97,3 +97,22 @@ class Collection(BaseModel):
     acquired_count: int
     total: int
     cards: list[CollectionCard]
+
+
+class Me(BaseModel):
+    needs_onboarding: bool  # 닉네임·약관 동의 전이면 true
+    nickname: str | None
+
+
+class Login(Me):
+    token: str  # 이후 요청에 Authorization: Bearer <token>
+
+
+class GoogleLogin(BaseModel):
+    id_token: str
+
+
+class Onboarding(BaseModel):
+    nickname: str
+    terms_accepted: bool
+    privacy_accepted: bool
