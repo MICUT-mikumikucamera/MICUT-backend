@@ -1,6 +1,6 @@
-# MiCut BE 앱 연결 API 명세 v0.3
+# MiCut BE 앱 연결 API 명세 v0.4
 
-2026-11-13 기준 · v0 대비 바뀐 점은 [6. 변경 이력](#6-변경-이력)에 있어요.
+2026-11-19 기준 · v0 대비 바뀐 점은 [6. 변경 이력](#6-변경-이력)에 있어요.
 
 ## 1. 백엔드 스택과 명세 공유 방식
 
@@ -25,7 +25,10 @@
 
 1. 사진 전송 → `job_id` 받기
 2. `job_id`로 1~2초마다 상태 조회 (폴링)
-3. `done` → 결과 이미지 다운로드 / `failed` → 재시도 또는 다시 찍기
+3. `awaiting_person` → 폴링을 멈추고 인물 선택 화면 → 선택 전송(⑧) → 다시 폴링
+4. `done` → 결과 이미지 다운로드 / `failed` → 재시도 또는 다시 찍기
+
+사진에 사람이 없으면 3번 없이 바로 4번이 돼요.
 
 **공통**
 
@@ -89,6 +92,8 @@ AI가 붙기 전까지는 서버가 AI 대신 가짜 처리를 해요. 접수하
     "crop": { "x": 875, "y": 0, "width": 2250, "height": 3000 }
   },
   "status": "pending",
+  "people": null,
+  "person": null,
   "attempt": 1,
   "result": null,
   "error": null,
@@ -111,9 +116,12 @@ AI가 붙기 전까지는 서버가 AI 대신 가짜 처리를 해요. 접수하
 | status | 화면 | 채워지는 필드 |
 | --- | --- | --- |
 | pending | 처리 중 | - |
-| processing | 처리 중 | - |
-| done | 결과 화면 | result |
-| failed | 실패 안내 | error |
+| processing | 처리 중 | 사람 인식이 끝났으면 people |
+| awaiting_person | 인물 선택 (⑧) | people |
+| done | 결과 화면 | people, person, result |
+| failed | 실패 안내 | error (실패한 단계에 따라 people, person) |
+
+`people`(사람 인식 결과)와 `person`(고른 사람)은 ⑧에 설명이 있어요.
 
 done일 때
 
@@ -144,6 +152,7 @@ failed일 때
 `POST /api/v1/jobs/{job_id}/retry` · 바디 없음
 
 - `failed`이면서 `retryable: true`인 작업만 가능해요.
+- 합성 단계에서 실패했으면 처음 고른 사람으로 다시 합성해요. 다시 `awaiting_person`이 되지 않아요. 사람 인식 단계에서 실패했으면 인식부터 다시 해요.
 - 응답 `200`: 다시 `pending`이 된 작업 (①과 같은 모양). `attempt`가 +1 되고 `error`는 `null`이 돼요. 이후 다시 상태 조회하면 돼요.
 
 실패: `404 JOB_NOT_FOUND`, `409 RETRY_NOT_ALLOWED` (실패 상태가 아니거나, 재시도할 수 없는 실패)
@@ -221,6 +230,47 @@ failed일 때
 
 실패: `422 INVALID_REQUEST` (`X-Device-Id`가 없거나 형식이 맞지 않음)
 
+### ⑧ 인물 선택
+
+`POST /api/v1/jobs/{job_id}/person` · `application/json`
+
+미쿠를 합성하기 전에 AI가 사진 속 사람을 찾아요. 1명 이상이면 작업이 `awaiting_person`에서 멈추고, 사용자가 미쿠가 따라 할 사람을 고르면 합성을 이어 가요. 1명이어도 "따라 하지 않기"를 고를 수 있게 멈춰요.
+
+`awaiting_person`일 때 작업의 `people`
+
+```json
+"people": {
+  "status": "ok",
+  "recommended_person_id": "p0",
+  "people": [
+    { "person_id": "p0", "bbox_norm": [0.10, 0.15, 0.45, 0.80], "eligible": true },
+    { "person_id": "p1", "bbox_norm": [0.75, 0.20, 0.82, 0.30], "eligible": false, "reason": "too_small" }
+  ]
+}
+```
+
+- AI의 사람 인식 결과를 그대로 전달해요. 인식 전에는 `null`. AI가 다른 필드를 더 보내면 같이 오니, 모르는 필드는 무시해 주세요.
+- `status`: `ok` (사람 있음) / `no_person` (사람 없음)
+- `recommended_person_id`: AI 추천. 선택 화면에서 미리 골라 두면 돼요. 없으면 `null`
+- `bbox_norm`: `[왼쪽, 위, 오른쪽, 아래]`, 보낸 사진(전체 원본) 크기 대비 0~1
+- `eligible: false`인 사람은 고를 수 없어요. `reason`에 이유가 와요 (예: `too_small`).
+
+요청 바디
+
+| 선택 | 바디 |
+| --- | --- |
+| 이 사람 따라 하기 | `{"mode": "human", "person_id": "p0"}` |
+| 따라 하지 않기 | `{"mode": "solo", "person_id": null}` |
+
+응답 `200`: `status`가 `processing`이고 `person`이 채워진 작업 (①과 같은 모양). 이후 다시 상태 조회하면 돼요.
+
+- 고른 결과는 작업의 `person`에 남아요. 선택 전에는 `null`이에요.
+- 사람이 0명이라 바로 합성한 작업은 서버가 `person`을 `{"mode": "solo", "person_id": null}`로 채워요.
+
+실패: `404 JOB_NOT_FOUND`, `409 PERSON_SELECT_NOT_ALLOWED` (`awaiting_person`이 아닌 작업), `422 INVALID_REQUEST` (잘못된 `mode`, 없는 `person_id`, `eligible: false`인 사람, `solo`인데 `person_id`가 있음)
+
+**사람 인식 AI 연결 전:** 서버가 모든 사진에 위 예시와 같은 가짜 사람 목록을 돌려줘요.
+
 ## 4. 에러 처리와 사진 보관
 
 실패는 항상 같은 모양이고, 화면은 `retryable`로 나눠요 (`true` 재시도 버튼, `false` 다시 찍기 안내). `message`는 사용자에게 그대로 보여 줘도 돼요.
@@ -239,6 +289,7 @@ failed일 때
 | INVALID_REQUEST | 필수 필드 누락, 타입 오류, 크기·crop 범위 불일치 | 422 | false | 다시 찍기 |
 | JOB_NOT_FOUND | 없는 작업 | 404 | false | 다시 찍기 |
 | RETRY_NOT_ALLOWED | 재시도할 수 없는 작업에 재시도 | 409 | false | 다시 찍기 |
+| PERSON_SELECT_NOT_ALLOWED | 인물을 고를 수 없는 작업에 선택 | 409 | false | 다시 찍기 |
 | PERSON_NOT_FOUND | 사람 인식 실패 | 조회 200 | false | 다시 찍기 |
 | FOOT_LOW_CONFIDENCE | 발이 잘 안 보임 | 조회 200 | false | 다시 찍기 |
 | AI_TIMEOUT | 처리 시간 초과 | 조회 200 | true | 재시도 |
@@ -273,8 +324,18 @@ failed일 때
 - `AI_TIMEOUT` 기준 시간
 - `tags` 목록
 - AI 결과에서 카드 id를 받는 위치 (11/19 AI 연결 때 확정)
+- 사람 인식 AI 연결 방식 (그 전까지 가짜 사람 목록)
+- 인물 선택 화면에서 고르지 않고 나간 작업을 정리하는 시점
 
 ## 6. 변경 이력
+
+**v0.4 (2026-11-19)**
+
+- 신규: ⑧ 인물 선택 `POST /api/v1/jobs/{job_id}/person`
+- 상태 `awaiting_person` 추가: 사람이 1명 이상이면 합성 전에 멈추고 선택을 기다려요.
+- 작업 응답에 `people`(사람 인식 결과), `person`(고른 사람) 필드 추가. 처음에는 `null`
+- 에러 코드 `PERSON_SELECT_NOT_ALLOWED` (409) 추가
+- ③ 재시도: 합성 단계 실패는 처음 고른 사람으로 다시 합성
 
 **v0.3 (2026-11-13)**
 

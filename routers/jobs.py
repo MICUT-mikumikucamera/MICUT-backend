@@ -13,7 +13,7 @@ import files
 import store
 from errors import AppError
 from routers.auth import owner
-from schemas import Capture, Crop, Job
+from schemas import Capture, Crop, Job, Person
 
 router = APIRouter(prefix="/api/v1/jobs", tags=["jobs"])
 
@@ -119,6 +119,25 @@ def retry_job(job_id: str, background_tasks: BackgroundTasks):
     store.save_job(job)
     # TODO(박유진): 시연이 끝나면 fake_ai.run 대신 실제 AI 처리를 시작
     background_tasks.add_task(fake_ai.run, job_id)
+    return job
+
+
+@router.post("/{job_id}/person", response_model=Job, response_model_exclude=HIDDEN)
+def select_person(job_id: str, person: Person, background_tasks: BackgroundTasks):
+    job = load_job(job_id)
+    if job.status != "awaiting_person":
+        raise AppError("PERSON_SELECT_NOT_ALLOWED")
+    if person.mode == "human":
+        ok = any(p.person_id == person.person_id and p.eligible for p in job.people.people)
+    else:
+        ok = person.person_id is None
+    if not ok:
+        raise AppError("INVALID_REQUEST")
+    job.person = person
+    job.status = "processing"
+    job.updated_at = datetime.now(KST)
+    store.save_job(job)
+    background_tasks.add_task(fake_ai.compose, job_id, job.attempt)
     return job
 
 

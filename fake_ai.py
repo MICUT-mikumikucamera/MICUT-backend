@@ -11,16 +11,34 @@ import files
 import store
 from routers import collection
 from errors import CODES
-from schemas import JobError, JobResult
+from schemas import JobError, JobResult, People, Person
 
 KST = timezone(timedelta(hours=9))
 
 
-def run_pipeline(photo: Path, out: Path) -> JobError | None:
+# 명세 v0.4 예시와 같은 가짜 사람 목록
+FAKE_PEOPLE = {
+    "status": "ok",
+    "recommended_person_id": "p0",
+    "people": [
+        {"person_id": "p0", "bbox_norm": [0.10, 0.15, 0.45, 0.80], "eligible": True},
+        {"person_id": "p1", "bbox_norm": [0.75, 0.20, 0.82, 0.30], "eligible": False, "reason": "too_small"},
+    ],
+}
+
+
+def detect_people(photo: bytes) -> People:
+    """AI 사람 인식 결과 (people.json)."""
+    # TODO(신소연): 사람 인식 AI 연결. 그 전까지는 모든 사진에 가짜 목록
+    return People.model_validate(FAKE_PEOPLE)
+
+
+def run_pipeline(photo: Path, out: Path, person: Person) -> JobError | None:
     command = [
         sys.executable, "-X", "utf8", os.environ["MICUT_RUN_SCRIPT"],
         "--photo", photo, "--model", os.environ["MICUT_MODEL"],
         "--blender", os.environ["BLENDER_BIN"], "--out", out,
+        *(["--person", person.person_id] if person.mode == "human" else ["--solo"]),
     ]
     run = subprocess.run(command, stdout=subprocess.PIPE, encoding="utf-8", errors="replace")
     if run.returncode == 0:
@@ -50,16 +68,40 @@ def read_card_id(out: Path) -> str | None:
 
 
 def run(job_id: str) -> None:
+    """접수·재시도 뒤: 사람 인식 → (사람이 있으면 선택 대기) → 합성"""
     job = store.get_job(job_id)
-    attempt = job.attempt
-
-    job = store.get_job(job_id)
-    if job.attempt != attempt or job.status != "pending":
+    if job.status != "pending":
         return
+    attempt = job.attempt
     job.status = "processing"
     job.updated_at = datetime.now(KST)
     store.save_job(job)
+    if job.person is not None:  # 재시도: 고른 사람으로 다시 합성
+        compose(job_id, attempt)
+        return
 
+    try:
+        people = job.people or detect_people(files.load("uploads", Path(job.photo).name))
+    except (OSError, ValueError, HTTPError):
+        finish(job_id, attempt, JobError(code="INTERNAL_ERROR", message="사람 인식을 실행할 수 없어요.", retryable=True))
+        return
+    job = store.get_job(job_id)
+    if job.attempt != attempt or job.status != "processing":
+        return
+    job.people = people
+    if people.people:
+        job.status = "awaiting_person"
+    else:
+        job.person = Person(mode="solo")
+    job.updated_at = datetime.now(KST)
+    store.save_job(job)
+    if job.person is not None:
+        compose(job_id, attempt)
+
+
+def compose(job_id: str, attempt: int) -> None:
+    """job.person을 따라 미쿠를 합성한다. 상태는 processing이어야 한다."""
+    job = store.get_job(job_id)
     error = None
     result = None
     card_id = None
@@ -69,7 +111,7 @@ def run(job_id: str) -> None:
             photo_name = Path(job.photo).name
             photo = Path(work).resolve() / photo_name
             photo.write_bytes(files.load("uploads", photo_name))
-            error = run_pipeline(photo, out)
+            error = run_pipeline(photo, out, job.person)
 
             if error is None:
                 image = out / "composite" / "composite_depth.png"
@@ -86,7 +128,11 @@ def run(job_id: str) -> None:
         error = JobError(code="INTERNAL_ERROR", message=f"서버에 {exc.args[0]} 설정이 없어요.", retryable=True)
     except (OSError, ValueError, HTTPError):
         error = JobError(code="RENDER_FAILED", message="합성 실행 또는 결과 파일을 확인할 수 없어요.", retryable=True)
+    finish(job_id, attempt, error, result, card_id)
 
+
+def finish(job_id: str, attempt: int, error: JobError | None, result: JobResult | None = None,
+           card_id: str | None = None) -> None:
     job = store.get_job(job_id)
     if job.attempt != attempt or job.status != "processing":
         return
