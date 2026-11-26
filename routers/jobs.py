@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Form, Header, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, UploadFile
 from PIL import Image
 from pydantic import ValidationError
 
@@ -12,14 +12,15 @@ import fake_ai
 import files
 import store
 from errors import AppError
-from schemas import DEVICE_ID, Capture, Crop, Job
+from routers.auth import owner
+from schemas import Capture, Crop, Job
 
 router = APIRouter(prefix="/api/v1/jobs", tags=["jobs"])
 
 KST = timezone(timedelta(hours=9))
 MAX_SIZE = 10 * 1024 * 1024
 DISCARD_AFTER = timedelta(hours=24)
-HIDDEN = {"device_id"}  # 작업 응답에 기기 ID는 내보내지 않는다.
+HIDDEN = {"device_id"}  # 작업 응답에 기기 ID·계정은 내보내지 않는다.
 
 
 def delete_photo(job: Job) -> None:
@@ -54,7 +55,7 @@ def create_job(
     rotation: int = Form(),
     fx: float | None = Form(None),
     crop: str = Form(),  # JSON 텍스트. Json[Crop]으로 받으면 FastAPI가 폼 필드 x, y, ...로 착각한다.
-    x_device_id: Annotated[str | None, Header(pattern=DEVICE_ID)] = None,
+    owner_id: Annotated[str | None, Depends(owner)] = None,
 ):
     try:
         crop = Crop.model_validate_json(crop)
@@ -93,7 +94,7 @@ def create_job(
         error=None,
         created_at=now,
         updated_at=now,
-        device_id=x_device_id,
+        device_id=owner_id,
     )
     store.save_job(job)
     # TODO(박유진): 시연이 끝나면 fake_ai.run 대신 실제 AI 처리를 시작

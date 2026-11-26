@@ -4,10 +4,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Header
+from fastapi import APIRouter, Depends
 
 import store
-from schemas import DEVICE_ID, Collection, CollectionCard, CollectionPhoto, Job
+from errors import AppError
+from routers.auth import owner
+from schemas import Collection, CollectionCard, CollectionPhoto, Job
 
 router = APIRouter(prefix="/api/v1/collection", tags=["collection"])
 
@@ -17,7 +19,7 @@ CARD_IDS = {card["id"] for card in CARDS}
 
 
 def award(job: Job, card_id: str | None) -> tuple[list[str], list[str]]:
-    """AI가 정한 카드를 기기 컬렉션에 기록한다. (card_ids, new_card_ids)
+    """AI가 정한 카드를 컬렉션 주인(계정 또는 기기)에 기록한다. (card_ids, new_card_ids)
 
     card_id가 None이면 컬렉션에 없는 포즈라 카드 없이 갤러리로만 간다.
     """
@@ -31,9 +33,11 @@ def award(job: Job, card_id: str | None) -> tuple[list[str], list[str]]:
 
 
 @router.get("", response_model=Collection)
-def read_collection(x_device_id: Annotated[str, Header(pattern=DEVICE_ID)]):
+def read_collection(owner_id: Annotated[str | None, Depends(owner)]):
+    if owner_id is None:  # 로그인도 X-Device-Id도 없음
+        raise AppError("INVALID_REQUEST")
     photos = {card["id"]: [] for card in CARDS}
-    for card_id, job_id, acquired_at in store.list_acquisitions(x_device_id):
+    for card_id, job_id, acquired_at in store.list_acquisitions(owner_id):
         if card_id in photos:  # cards.json에서 빠진 카드의 기록은 무시한다.
             photos[card_id].append(CollectionPhoto(job_id=job_id, acquired_at=acquired_at))
     cards = [

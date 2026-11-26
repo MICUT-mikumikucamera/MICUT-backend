@@ -190,6 +190,92 @@ for bad in ["", "a b", "x" * 65, "a/b"]:
 r = c.post("/api/v1/jobs", files={"photo": ("a.jpg", JPG, "image/jpeg")}, data=FIELDS, headers={"X-Device-Id": "a b"})
 assert r.status_code == 422
 
+# 로그인: 구글 검증 대신 가짜 토큰 → sub
+from routers import auth  # noqa: E402
+
+real_verify = auth.verify_google
+try:
+    real_verify("x")  # GOOGLE_CLIENT_ID 없이는 아예 검증하지 않는다
+    raise AssertionError
+except RuntimeError:
+    pass
+GOOGLE = {"tok-a": "111", "tok-b": "222"}
+
+
+def fake_verify(token):
+    if token not in GOOGLE:
+        raise ValueError("bad token")
+    return GOOGLE[token]
+
+
+auth.verify_google = fake_verify
+
+
+def login(token, headers=None):
+    return c.post("/api/v1/auth/google", json={"id_token": token}, headers=headers or {})
+
+
+def unauthorized(r):
+    return r.status_code == 401 and r.json()["error"]["code"] == "UNAUTHORIZED"
+
+
+assert unauthorized(login("forged"))
+assert unauthorized(c.get("/api/v1/me"))
+assert unauthorized(c.get("/api/v1/me", headers={"Authorization": "Bearer nope"}))
+
+# 첫 로그인: 온보딩 필요. 이 기기(dev-a)로 모은 카드가 계정으로 옮겨진다.
+r = login("tok-a", DEV)
+assert r.status_code == 200 and r.json()["needs_onboarding"] is True and r.json()["nickname"] is None
+A = {"Authorization": f"Bearer {r.json()['token']}"}
+assert c.get("/api/v1/collection", headers=A).json()["acquired_count"] == 2
+assert c.get("/api/v1/collection", headers=DEV).json()["acquired_count"] == 0
+assert c.get("/api/v1/me", headers=A).json() == {"needs_onboarding": True, "nickname": None}
+
+
+def onboard(nickname, headers=A, terms=True, privacy=True):
+    body = {"nickname": nickname, "terms_accepted": terms, "privacy_accepted": privacy}
+    return c.post("/api/v1/me/onboarding", json=body, headers=headers)
+
+
+def error_code(r):
+    return r.status_code, r.json()["error"]["code"]
+
+
+# 규칙 위반·필수 동의 누락은 422, 예약어는 409. 실패하면 아무것도 저장되지 않는다.
+for bad in ["a", "x" * 21, "미 쿠", "미쿠​짱", "미쿠😀", "미쿠©"]:
+    assert error_code(onboard(bad)) == (422, "INVALID_REQUEST"), bad
+assert error_code(onboard("미쿠짱", terms=False)) == (422, "INVALID_REQUEST")
+assert error_code(onboard("미쿠짱", privacy=False)) == (422, "INVALID_REQUEST")
+assert error_code(onboard("ADMIN")) == (409, "NICKNAME_TAKEN")
+assert c.get("/api/v1/me", headers=A).json()["needs_onboarding"] is True
+assert unauthorized(onboard("미쿠짱", headers={}))
+
+assert onboard("가나").json() == {"needs_onboarding": False, "nickname": "가나"}  # 풀어 쓴 한글도 2글자
+assert onboard("가" * 20).status_code == 200
+r = onboard("Miku")                                                     # 다시 부르면 닉네임만 바뀐다
+assert r.json() == {"needs_onboarding": False, "nickname": "Miku"}
+assert onboard("Miku").status_code == 200                               # 내 닉네임은 중복이 아니다
+
+# 다른 계정은 같은 닉네임(대소문자만 달라도)을 못 쓴다
+B = {"Authorization": f"Bearer {login('tok-b').json()['token']}"}
+assert error_code(onboard("MIKU", B)) == (409, "NICKNAME_TAKEN")
+assert c.get("/api/v1/me", headers=B).json() == {"needs_onboarding": True, "nickname": None}
+
+again = login("tok-a").json()                                           # 다시 로그인하면 바로 홈
+assert again["needs_onboarding"] is False and again["nickname"] == "Miku"
+
+# 로그인한 채 찍은 사진의 카드는 계정 컬렉션에 쌓인다 (기기 ID를 같이 보내도 계정 우선)
+assert submit_as({**A, **DEV}, "leek")[1:] == (["leek"], ["leek"])
+assert c.get("/api/v1/collection", headers=A).json()["acquired_count"] == 3
+assert c.get("/api/v1/collection", headers=B).json()["acquired_count"] == 0
+assert unauthorized(c.get("/api/v1/collection", headers={**DEV, "Authorization": "Bearer nope"}))
+
+# 로그아웃하면 그 토큰은 끝. 만료된 세션도 401.
+assert c.post("/api/v1/auth/logout", headers=B).status_code == 204
+assert unauthorized(c.get("/api/v1/me", headers=B))
+store.run("UPDATE sessions SET expires_at = ?", ("2000-01-01T00:00:00+09:00",))
+assert unauthorized(c.get("/api/v1/me", headers=A))
+
 store.conn.close()
 os.chdir(ROOT)
 shutil.rmtree(tmp, ignore_errors=True)
